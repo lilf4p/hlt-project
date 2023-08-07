@@ -1,5 +1,6 @@
 # Human Language Technology Project UniPi 2022/2023 
 ## Legal Judgement Predictor for ECHR
+![echr](images/COE-logo-ECHR.png)
 This repository contains the code for the Human Language Technology Project of the University of Pisa, academic year 2022/2023. The project consists in the development of a Legal Judgement Predictor for the European Court of Human Rights (ECHR). The dataset used for the project is the [ECHR dataset][def1] which was made publicily available by the authors of the paper [Neural Legal Judgement Prediction in English][def2].
 
 ## Introduction
@@ -9,6 +10,7 @@ This project aims to focus on some of the task presented in the paper [Neural Le
 The dataset is composed of 5847 cases, each of which is composed of a text and a label. The text is the description of the case, while the label is the judgement of the case. The judgement can be either "violation" or "non-violation". The dataset is divided into 3 subsets: train, dev and test. The train set is composed of 7100 cases, the dev set is composed of 1380 cases and the test set is composed of 2998 cases.
 
 ## Task
+![task](images/Legal-judgment-prediction-with-rationale-extraction.png)
 The task is to predict the judgement of a case given its description. The task can be binary or multi-class. In the binary case the output is either "violation" or "non-violation", while in the multi-class we want to predict the exact article of the ECHR that was violated. The task can also be extended to generate a sentence with justification for the judgement.
 
 ## Authors
