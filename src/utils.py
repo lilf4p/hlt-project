@@ -44,7 +44,73 @@ def load_ECHR(anon:bool=False):
 
     # return train, dev and test dataset
     return df_train, df_dev, df_test
-            
+
+def load_ECHR_small(anon:bool=False, n:int=100):
+
+    # load train, dev and test dataset from json to pandas dataframe
+    sfx = '_Anon' if anon else ''
+    
+    # define dataframe empty
+    df_train = pd.DataFrame()
+    df_dev = pd.DataFrame()
+    df_test = pd.DataFrame()
+
+    i = 0
+
+    # train dataset
+    train_path = 'ECHR_Dataset/EN_train'+sfx+'/'
+    # for all the files in a directory 
+    for filename in os.listdir(train_path):
+
+        if i == n:
+            break
+
+        with open(train_path+filename) as f:
+            # add json to dataframe as a row
+            data = json.load(f)
+            df = pd.DataFrame.from_dict(data, orient='index').T
+            df_train = df_train._append(df, ignore_index=True)
+        
+        i += 1
+
+    i = 0
+
+    # dev dataset
+    dev_path = 'ECHR_Dataset/EN_dev'+sfx+'/'
+    # for all the files in a directory
+    for filename in os.listdir(dev_path):
+
+        if i == n/2:
+            break
+
+        with open(dev_path+filename) as f:
+            # add json to dataframe as a row
+            data = json.load(f)
+            df = pd.DataFrame.from_dict(data, orient='index').T
+            df_dev = df_dev._append(df, ignore_index=True)
+
+        i += 1
+    
+    i = 0
+
+    # test dataset
+    test_path = 'ECHR_Dataset/EN_test'+sfx+'/'
+    # for all the files in a directory
+    for filename in os.listdir(test_path):
+
+        if i == n/2:
+            break
+
+        with open(test_path+filename) as f:
+            # add json to dataframe as a row
+            data = json.load(f)
+            df = pd.DataFrame.from_dict(data, orient='index').T
+            df_test = df_test._append(df, ignore_index=True)
+
+        i += 1
+
+    # return train, dev and test dataset
+    return df_train, df_dev, df_test
 
 if __name__ == "__main__":
     # test load_ECHR
@@ -52,6 +118,13 @@ if __name__ == "__main__":
     print(df_train)
     print(df_dev)
     print(df_test)
+
+    # test load_ECHR_small
+    df_train, df_dev, df_test = load_ECHR_small(n=10)
+    print(df_train)
+    print(df_dev)
+    print(df_test)
+
 
     
     
