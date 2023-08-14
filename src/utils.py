@@ -55,6 +55,11 @@ def load_ECHR(path:str, anon:bool=False):
             df = pd.DataFrame.from_dict(data, orient='index').T
             df_test = df_test._append(df, ignore_index=True)
 
+    # add a column with 0/1 labels to the dataframe 0 if VIOLATED_ARTICLE is empty, 1 otherwise
+    df_train['LABEL'] = df_train['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
+    df_dev['LABEL'] = df_dev['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
+    df_test['LABEL'] = df_test['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
+    
     # return train, dev and test dataset
     return df_train, df_dev, df_test
 
@@ -136,8 +141,47 @@ def load_ECHR_small(path:str, anon:bool=False, n:int=100):
 
         i += 1
 
+    # add a column with 0/1 labels to the dataframe 0 if VIOLATED_ARTICLE is empty, 1 otherwise
+    df_train['LABEL'] = df_train['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
+    df_dev['LABEL'] = df_dev['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
+    df_test['LABEL'] = df_test['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
+
     # return train, dev and test dataset
     return df_train, df_dev, df_test
+
+
+# define a function which return a subsampling of the dataset, it has to be balanced
+def subsampling(df, n:int=100):
+    
+        """Subsampling of the dataset, it has to be balanced
+        
+        Args:
+            df (pd.DataFrame): dataset to subsample
+            n (int, optional): number of files to load. Defaults to 100.
+        
+        Returns:
+            df (pd.DataFrame): subsampled dataset
+    
+        """
+    
+        # define dataframe empty
+        df_sub = pd.DataFrame()
+    
+        # define a list of the labels
+        labels = df['LABEL'].unique()
+    
+        # for each label
+        for label in labels:
+            # select the rows of the label
+            df_label = df[df['LABEL'] == label]
+            # take n rows
+            df_label = df_label.sample(n=n)
+            # add to the dataframe
+            df_sub = df_sub._append(df_label, ignore_index=True)
+    
+        # return the subsampled dataframe
+        return df_sub
+
 
 if __name__ == "__main__":
     # test load_ECHR
@@ -146,13 +190,11 @@ if __name__ == "__main__":
     print(df_dev)
     print(df_test)
 
-    # test load_ECHR_small
-    df_train, df_dev, df_test = load_ECHR_small('ECHR_Dataset',n=10)
-    print(df_train)
-    print(df_dev)
-    print(df_test)
-
-
+    # test subsampling
+    print(subsampling(df_train, n=10))
+    print(subsampling(df_dev, n=10))
+    print(subsampling(df_test, n=10))
+ 
     
     
 
