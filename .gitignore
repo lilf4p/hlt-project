@@ -1,2 +1,4 @@
 /__pycache__
 /model-echr-bert
+/.DS_Store
+/src/__pycache__
