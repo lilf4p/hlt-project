@@ -1,6 +1,7 @@
 import json
 import os
 import pandas as pd
+import torch
 
 def load_ECHR(path:str, anon:bool=False):
 
@@ -181,6 +182,33 @@ def subsampling(df, n:int=100):
     
         # return the subsampled dataframe
         return df_sub
+
+def metrics_model(dataset, model):
+
+  predicted_labels = []
+  labels = []
+
+  for test in dataset:
+
+    # convert to tensor
+    test['input_ids'] = torch.Tensor(test['input_ids'])
+    test['token_type_ids'] = torch.Tensor(test['token_type_ids'])
+    test['attention_mask'] = torch.Tensor(test['attention_mask'])
+
+    # reshape
+    test['input_ids'] = test['input_ids'].reshape(1,-1).to(torch.int64)
+    test['token_type_ids'] = test['token_type_ids'].reshape(1,-1).to(torch.int64)
+    test['attention_mask'] = test['attention_mask'].reshape(1,-1).to(torch.int64)
+
+    with torch.no_grad():
+      logits = model(input_ids = test['input_ids'], token_type_ids = test['token_type_ids'], attention_mask = test['attention_mask']).logits
+
+    predicted_class_id = logits.argmax().item()
+
+    predicted_labels.append(predicted_class_id)
+    labels.append(test['label'])
+  
+  return predicted_labels,labels
 
 
 if __name__ == "__main__":
