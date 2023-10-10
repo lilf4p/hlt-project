@@ -60,6 +60,19 @@ def load_ECHR(path:str, anon:bool=False):
     df_train['LABEL'] = df_train['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
     df_dev['LABEL'] = df_dev['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
     df_test['LABEL'] = df_test['VIOLATED_ARTICLES'].apply(lambda x: 0 if x == [] else 1)
+
+    # change name TEXT to text and LABEL to label
+    df_train.rename(columns={'TEXT': 'text', 'LABEL': 'label'}, inplace=True)
+    df_dev.rename(columns={'TEXT': 'text', 'LABEL': 'label'}, inplace=True)
+    df_test.rename(columns={'TEXT': 'text', 'LABEL': 'label'}, inplace=True)
+
+    train_text = df_train['text'].values
+    dev_text = df_dev['text'].values
+    test_text = df_test['text'].values
+
+    df_train['text'] = [ "".join(x) for x in train_text]
+    df_dev['text'] = [ "".join(x) for x in dev_text]
+    df_test['text'] = [ "".join(x) for x in test_text]
     
     # return train, dev and test dataset
     return df_train, df_dev, df_test
@@ -218,10 +231,12 @@ if __name__ == "__main__":
     print(df_dev)
     print(df_test)
 
+    print(df_train['text'][0])
+
     # test subsampling
-    print(subsampling(df_train, n=10))
-    print(subsampling(df_dev, n=10))
-    print(subsampling(df_test, n=10))
+    #print(subsampling(df_train, n=10))
+    #print(subsampling(df_dev, n=10))
+    #print(subsampling(df_test, n=10))
  
     
     
