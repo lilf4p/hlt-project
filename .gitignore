@@ -3,8 +3,5 @@
 /.DS_Store
 /src/__pycache__
 /ECHR_Dataset
-/ECHR_Dataset/dev.csv
-/ECHR_Dataset/test.csv
-/ECHR_Dataset/train.csv
 /ECHR_Dataset.zip
 ECHR_Dataset/.DS_Store
