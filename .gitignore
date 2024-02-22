@@ -2,6 +2,6 @@
 /model-echr-bert
 /.DS_Store
 /src/__pycache__
-/ECHR_Dataset
+/ECHR_Dataset/EN*
 /ECHR_Dataset.zip
 ECHR_Dataset/.DS_Store
