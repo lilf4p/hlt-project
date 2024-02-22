@@ -2,6 +2,11 @@
 /model-echr-bert
 /.DS_Store
 /src/__pycache__
-/ECHR_Dataset/EN*
+/ECHR_Dataset/EN_dev
+/ECHR_Dataset/EN_dev_Anon
+/ECHR_Dataset/EN_test
+/ECHR_Dataset/EN_test_Anon
+/ECHR_Dataset/EN_train
+/ECHR_Dataset/EN_train_Anon
 /ECHR_Dataset.zip
 ECHR_Dataset/.DS_Store
