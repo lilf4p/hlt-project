@@ -12,3 +12,4 @@
 ECHR_Dataset/.DS_Store
 /ECHR_Dataset_Tokenized
 embeddings.pt
+/embeddings

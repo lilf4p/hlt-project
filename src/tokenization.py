@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 from utils import load_ECHR
+import transformers
+from tqdm import tqdm
 def tokenize_document(row, tokenizer, max_length=512):
     '''
         Tokenize a document using the provided tokenizer
@@ -41,20 +43,28 @@ def add_attention_masks(row):
     return attention_masks
 
 def tokenization_pipeline(tokenizer, path, max_length=512, anon=False, save=False):
+    print('loading dataset')
     df_train, df_dev, df_test = load_ECHR('../ECHR_Dataset', anon=anon)
     # tokenize the documents
-    df_train['input_ids'] = df_train['text'].apply(lambda row: tokenize_document(row, tokenizer, max_length=max_length))
-    df_dev['input_ids'] = df_dev['text'].apply(lambda row: tokenize_document(row, tokenizer, max_length=max_length))
-    df_test['input_ids'] = df_test['text'].apply(lambda row: tokenize_document(row, tokenizer, max_length=max_length))
+    print('tokenizing')
+    tqdm.pandas()
+
+    df_train['input_ids'] = df_train['text'].progress_apply(lambda row: tokenize_document(row, tokenizer, max_length=max_length))
+    df_dev['input_ids'] = df_dev['text'].progress_apply(lambda row: tokenize_document(row, tokenizer, max_length=max_length))
+    df_test['input_ids'] = df_test['text'].progress_apply(lambda row: tokenize_document(row, tokenizer, max_length=max_length))
     # add attention masks
-    df_train['attention_mask'] = df_train['input_ids'].apply(lambda row: add_attention_masks(row))
-    df_dev['attention_mask'] = df_dev['input_ids'].apply(lambda row: add_attention_masks(row))
-    df_test['attention_mask'] = df_test['input_ids'].apply(lambda row: add_attention_masks(row))
+    df_train['attention_mask'] = df_train['input_ids'].progress_apply(lambda row: add_attention_masks(row))
+    df_dev['attention_mask'] = df_dev['input_ids'].progress_apply(lambda row: add_attention_masks(row))
+    df_test['attention_mask'] = df_test['input_ids'].progress_apply(lambda row: add_attention_masks(row))
     if save:
         df_train.to_pickle(path + '/train_tokenized.pkl')
         df_dev.to_pickle(path + '/dev_tokenized.pkl')
         df_test.to_pickle(path + '/test_tokenized.pkl')
     return df_train, df_dev, df_test
 
+if __name__ == '__main__':
+    tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+
+    tokenization_pipeline(tokenizer, '../ECHR_Dataset_Tokenized/legal-bert-base-uncased', max_length=512, anon=False, save=True)
 
 
