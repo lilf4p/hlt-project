@@ -13,3 +13,17 @@ ECHR_Dataset/.DS_Store
 /ECHR_Dataset_Tokenized
 embeddings.pt
 /embeddings
+embeddings_dev.pt
+hlt-project.code-workspace
+dev_labels.pkl
+train_labels.pkl
+test_labels.pkl
+legal_embeddings/legal-bert-base-uncased/emb_dev_cpu.pkl
+legal_embeddings/legal-bert-base-uncased/emb_dev.pkl
+legal_embeddings/legal-bert-base-uncased/emb_test_cpu.pkl
+legal_embeddings/legal-bert-base-uncased/emb_test.pkl
+legal_embeddings/legal-bert-base-uncased/emb_tr_cpu.pkl
+legal_embeddings/legal-bert-base-uncased/emb_tr.pkl
+legal_embeddings/.DS_Store
+/embeddings_datasets
+/models
