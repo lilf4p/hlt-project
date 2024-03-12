@@ -2,6 +2,10 @@ import json
 import os
 import pandas as pd
 import torch
+from sklearn.model_selection import KFold
+from torch.utils.data import DataLoader, SubsetRandomSampler
+from tqdm import tqdm
+from sklearn.metrics import f1_score
 
 def load_ECHR(path:str, anon:bool=False):
 
@@ -223,6 +227,137 @@ def metrics_model(dataset, model):
   
   return predicted_labels,labels
 
+def k_fold_attention(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
+    kf = KFold(n_splits=k_folds, shuffle=True)
+    fold_results = []
+
+    for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
+        print(f"Fold {fold}/{k_folds}")
+
+        # Initialize tqdm progress bar for epochs
+        epoch_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
+
+        # Split dataset into train and validation for this fold
+        train_sampler = SubsetRandomSampler(train_indices)
+        val_sampler = SubsetRandomSampler(val_indices)
+
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
+        val_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=val_sampler)
+
+        best_val_loss = float('inf')
+        best_model_state = None
+
+        for epoch in epoch_progress_bar:
+            model.train()
+            running_loss = 0.0
+
+            loop = tqdm(train_loader, total=len(train_loader), leave=False)
+
+            for inputs, att_masks, labels in loop:
+                optimizer.zero_grad()
+                outputs = model(inputs, att_masks)
+                loss = criterion(outputs, labels.float())
+                loss.backward()
+                optimizer.step()
+                running_loss += loss.item()
+
+            train_loss = running_loss / len(train_loader)
+            with torch.no_grad():
+                model.eval()
+                val_running_loss = 0.0
+
+                for inputs, att_masks, labels in val_loader:
+                    outputs = model(inputs, att_masks)
+                    val_loss = criterion(outputs, labels.float())
+                    val_running_loss += val_loss.item()
+
+                val_loss = val_running_loss / len(val_loader)
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_model_state = model.state_dict()
+
+            # Update the description of the epoch progress bar
+            epoch_progress_bar.set_postfix({
+                "Train Loss": train_loss,
+                "Val Loss": val_loss,
+            })
+
+        fold_results.append({
+            'fold': fold,
+            'best_val_loss': best_val_loss,
+            'best_model_state': best_model_state
+        })
+
+    return fold_results
+
+def k_fold_rnn(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
+    kf = KFold(n_splits=k_folds, shuffle=True)
+    fold_results = []
+
+    for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
+        print(f"Fold {fold}/{k_folds}")
+
+        # Initialize tqdm progress bar for epochs
+        epoch_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
+
+        # Split dataset into train and validation for this fold
+        train_sampler = SubsetRandomSampler(train_indices)
+        val_sampler = SubsetRandomSampler(val_indices)
+
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
+        val_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=val_sampler)
+
+        best_val_loss = float('inf')
+        best_model_state = None
+
+        for epoch in epoch_progress_bar:
+            model.train()
+            running_loss = 0.0
+
+            loop = tqdm(train_loader, total=len(train_loader), leave=False)
+
+            for inputs, att_masks, labels in loop:
+                lengths = att_masks.sum(1).to('cpu')
+                optimizer.zero_grad()
+                outputs = model(inputs, lengths)
+                loss = criterion(outputs, labels.float())
+                loss.backward()
+                optimizer.step()
+                running_loss += loss.item()
+
+            train_loss = running_loss / len(train_loader)
+
+            
+            model.eval()
+            with torch.no_grad():
+                val_running_loss = 0.0
+
+                for inputs, att_masks, labels in val_loader:
+                    val_lengths = att_masks.sum(1).to('cpu')
+                    outputs = model(inputs, val_lengths)
+                    val_loss = criterion(outputs, labels.float())
+                    val_running_loss += val_loss.item()
+
+                val_loss = val_running_loss / len(val_loader)
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_model_state = model.state_dict()
+
+            # Update the description of the epoch progress bar
+            epoch_progress_bar.set_postfix({
+                "Train Loss": train_loss,
+                "Val Loss": val_loss,
+            })
+
+        fold_results.append({
+            'fold': fold,
+            'best_val_loss': best_val_loss,
+            'best_model_state': best_model_state
+        })
+
+    return fold_results
 
 if __name__ == "__main__":
     # test load_ECHR
