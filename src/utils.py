@@ -6,14 +6,6 @@ from tqdm import tqdm
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from sklearn.metrics import accuracy_score, f1_score
-from tqdm import tqdm
-from sklearn.model_selection import KFold
-from torch.utils.data import DataLoader, SubsetRandomSampler
-from sklearn.metrics import accuracy_score, f1_score
-from tqdm import tqdm
-from sklearn.model_selection import KFold
-from torch.utils.data import DataLoader, SubsetRandomSampler
-from sklearn.metrics import accuracy_score, f1_score
 
 def load_ECHR(path:str, anon:bool=False):
 
@@ -235,6 +227,16 @@ def metrics_model(dataset, model):
   
   return predicted_labels,labels
 
+def reset_weights(m):
+  '''
+    Try resetting model weights to avoid
+    weight leakage.
+  '''
+  for layer in m.children():
+   if hasattr(layer, 'reset_parameters'):
+    print(f'Reset trainable parameters of layer = {layer}')
+    layer.reset_parameters()
+
 def k_fold_attention(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
     kf = KFold(n_splits=k_folds, shuffle=True)
 
@@ -242,6 +244,8 @@ def k_fold_attention(model, criterion, optimizer, train_dataset, k_folds=5, epoc
 
     for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
         print(f"Fold {fold}/{k_folds}")
+
+        reset_weights(model)
 
         fold_results[fold] = {}
 
@@ -335,6 +339,8 @@ def k_fold_rnn(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10,
 
     for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
         print(f"Fold {fold}/{k_folds}")
+
+        reset_weights(model)
 
         fold_results[fold] = {}
 
