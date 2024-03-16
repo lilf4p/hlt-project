@@ -32,3 +32,4 @@ legal_embeddings/legal-bert-base-uncased/emb_tr.pkl
 legal_embeddings/.DS_Store
 /embeddings_datasets
 /models
+/models

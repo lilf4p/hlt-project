@@ -10,6 +10,10 @@ from tqdm import tqdm
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from sklearn.metrics import accuracy_score, f1_score
+from tqdm import tqdm
+from sklearn.model_selection import KFold
+from torch.utils.data import DataLoader, SubsetRandomSampler
+from sklearn.metrics import accuracy_score, f1_score
 
 def load_ECHR(path:str, anon:bool=False):
 
@@ -231,6 +235,196 @@ def metrics_model(dataset, model):
   
   return predicted_labels,labels
 
+def k_fold_attention(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
+    kf = KFold(n_splits=k_folds, shuffle=True)
+
+    fold_results = {}
+
+    for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
+        print(f"Fold {fold}/{k_folds}")
+
+        fold_results[fold] = {}
+
+        # Initialize tqdm progress bar for epochs
+        epoch_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
+
+        # Split dataset into train and validation for this fold
+        train_sampler = SubsetRandomSampler(train_indices)
+        val_sampler = SubsetRandomSampler(val_indices)
+
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
+        val_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=val_sampler)
+
+        best_val_loss = float('inf')
+        best_val_acc = 0.0
+        best_val_f1 = 0.0
+
+        fold_results[fold]['stats'] = {
+            'train_losses': [],
+            'val_losses': [],
+            'val_accs': [],
+            'val_f1s': []
+        }
+
+        for epoch in epoch_progress_bar:
+            model.train()
+            running_loss = 0.0
+
+            loop = tqdm(train_loader, total=len(train_loader), leave=False)
+
+            for inputs, att_masks, labels in loop:
+                optimizer.zero_grad()
+                outputs = model(inputs, att_masks)
+                loss = criterion(outputs, labels.float())
+                loss.backward()
+                optimizer.step()
+                running_loss += loss.item()
+
+            train_loss = running_loss / len(train_loader)
+            with torch.no_grad():
+                model.eval()
+                val_running_loss = 0.0
+                predictions = []
+                labels_topredict = []
+
+                for inputs, att_masks, labels in val_loader:
+                    outputs = model(inputs, att_masks)
+                    val_loss = criterion(outputs, labels.float())
+                    val_running_loss += val_loss.item()
+                    predictions.append(torch.round(outputs).to('cpu'))
+                    labels_topredict.append(labels.to('cpu'))
+
+                predictions = torch.cat(predictions).numpy()
+                labels_topredict = torch.cat(labels_topredict).numpy()
+                val_loss = val_running_loss / len(val_loader)
+                val_acc = accuracy_score(labels_topredict, predictions)
+                val_f1 = f1_score(labels_topredict, predictions)
+
+                fold_results[fold]['stats']['train_losses'].append(train_loss)
+                fold_results[fold]['stats']['val_losses'].append(val_loss)
+                fold_results[fold]['stats']['val_accs'].append(val_acc)
+                fold_results[fold]['stats']['val_f1s'].append(val_f1)
+
+                # If the validation loss is the best, save the validation 
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_val_acc = val_acc
+                    best_val_f1 = val_f1
+
+            # Update the description of the epoch progress bar
+            epoch_progress_bar.set_postfix({
+                "Train Loss": train_loss,
+                "Val Loss": val_loss,
+                "Val Acc": val_acc,
+                "Val F1": val_f1,
+            })
+
+        fold_results[fold]['result'] = {
+            'best_val_loss': best_val_loss,
+            'best_val_acc': best_val_acc,
+            'best_val_f1': best_val_f1, 
+        }
+
+    return fold_results
+
+def k_fold_rnn(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
+
+    kf = KFold(n_splits=k_folds, shuffle=True)
+
+    fold_results = {}
+
+    for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
+        print(f"Fold {fold}/{k_folds}")
+
+        fold_results[fold] = {}
+
+        # Initialize tqdm progress bar for epochs
+        epoch_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
+
+        # Split dataset into train and validation for this fold
+        train_sampler = SubsetRandomSampler(train_indices)
+        val_sampler = SubsetRandomSampler(val_indices)
+
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
+        val_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=val_sampler)
+
+        best_val_loss = float('inf')
+        best_val_acc = 0.0
+        best_val_f1 = 0.0
+
+        fold_results[fold]['stats'] = {
+            'train_losses': [],
+            'val_losses': [],
+            'val_accs': [],
+            'val_f1s': []
+        }
+
+        for epoch in epoch_progress_bar:
+            model.train()
+            running_loss = 0.0
+
+            loop = tqdm(train_loader, total=len(train_loader), leave=False)
+
+            for inputs, att_masks, labels in loop:
+                lengths = att_masks.sum(1)
+                optimizer.zero_grad()
+                outputs = model(inputs, lengths)
+                loss = criterion(outputs, labels.float())
+                loss.backward()
+                optimizer.step()
+                running_loss += loss.item()
+
+            train_loss = running_loss / len(train_loader)
+
+            
+            model.eval()
+            with torch.no_grad():
+                val_running_loss = 0.0
+
+                predictions = []
+                labels_topredict = []
+
+                for inputs, att_masks, labels in val_loader:
+                    val_lengths = att_masks.sum(1)
+                    outputs = model(inputs, val_lengths)
+                    val_loss = criterion(outputs, labels.float())
+                    val_running_loss += val_loss.item()
+                    predictions.append(torch.round(outputs).to('cpu'))
+                    labels_topredict.append(labels.to('cpu'))
+
+                predictions = torch.cat(predictions).numpy()
+                labels_topredict = torch.cat(labels_topredict).numpy()
+                val_loss = val_running_loss / len(val_loader)
+                val_acc = accuracy_score(labels_topredict, predictions)
+                val_f1 = f1_score(labels_topredict, predictions)
+
+                fold_results[fold]['stats']['train_losses'].append(train_loss)
+                fold_results[fold]['stats']['val_losses'].append(val_loss)
+                fold_results[fold]['stats']['val_accs'].append(val_acc)
+                fold_results[fold]['stats']['val_f1s'].append(val_f1)
+
+                # If the validation loss is the best, save the validation 
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_val_acc = val_acc
+                    best_val_f1 = val_f1
+
+            # Update the description of the epoch progress bar
+            epoch_progress_bar.set_postfix({
+                "Train Loss": train_loss,
+                "Val Loss": val_loss,
+                "Val Acc": val_acc,
+                "Val F1": val_f1
+            })
+
+        fold_results[fold]['result'] = {
+            'fold': fold,
+            'best_val_loss': best_val_loss,
+            'best_val_acc': best_val_acc,
+            'best_val_f1': best_val_f1
+        }
+
+    return fold_results
 
 if __name__ == "__main__":
     # test load_ECHR
