@@ -3,9 +3,11 @@ import os
 import pandas as pd
 import torch
 from tqdm import tqdm
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 from torch.utils.data import DataLoader, SubsetRandomSampler, RandomSampler
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.model_selection import train_test_split
+from torch.utils.data import TensorDataset
 
 def load_ECHR(path:str, anon:bool=False):
 
@@ -332,36 +334,77 @@ def k_fold_attention(model, criterion, optimizer, train_dataset, k_folds=5, epoc
     return fold_results
 
 def train_attention(model, criterion, optimizer, train_dataset, epochs=10, batch_size=64):
-  # No KFold initialization or fold results dictionary
-
-  # Training loop
-  train_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
-
   
+    best_val_loss = float('inf')
+    best_val_acc = 0.0
+    best_val_f1 = 0.0
 
-  train_sampler = RandomSampler(train_dataset)
-  train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
+    train_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
 
-  for epoch in train_progress_bar:
-    model.train()
-    running_loss = 0.0
+    # split train dataset into train and validation
+    X_train, X_val, y_train, y_val = train_test_split(train_dataset.data, train_dataset.labels, test_size=0.05, random_state=42)
 
-    loop = tqdm(train_loader, total=len(train_loader), leave=False)
+    train = TensorDataset(X_train, y_train)
+    val = TensorDataset(X_val, y_val)
 
-    for inputs, att_masks, labels in loop:
-      optimizer.zero_grad()
-      outputs = model(inputs, att_masks)
-      loss = criterion(outputs, labels.float())
-      loss.backward()
-      optimizer.step()
-      running_loss += loss.item()
+    train_sampler = RandomSampler(train)
+    train_loader = DataLoader(train, batch_size=batch_size, sampler=train_sampler)
 
-    train_loss = running_loss / len(train_loader)
+    val_sampler = RandomSampler(val)
+    val_loader = DataLoader(val, batch_size=batch_size, sampler=val_sampler)
 
-    # Update the description of the epoch progress bar
-    train_progress_bar.set_postfix({"Train Loss": train_loss})
+    for epoch in train_progress_bar:
+        model.train()
+        running_loss = 0.0
 
-# No fold results to return
+        loop = tqdm(train_loader, total=len(train_loader), leave=False)
+
+        for inputs, att_masks, labels in loop:
+            optimizer.zero_grad()
+            outputs = model(inputs, att_masks)
+            loss = criterion(outputs, labels.float())
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        train_loss = running_loss / len(train_loader)
+
+        with torch.no_grad():
+            model.eval()
+            val_running_loss = 0.0
+            predictions = []
+            labels_topredict = []
+            
+            for inputs, att_masks, labels in val_loader:
+                outputs = model(inputs, att_masks)
+                val_loss = criterion(outputs, labels.float())
+                val_running_loss += val_loss.item()
+                predictions.append(torch.round(outputs).to('cpu'))
+                labels_topredict.append(labels.to('cpu'))
+            
+            predictions = torch.cat(predictions).numpy()
+            labels_topredict = torch.cat(labels_topredict).numpy()
+            val_loss = val_running_loss / len(val_loader)
+            val_acc = accuracy_score(labels_topredict, predictions)
+            val_f1 = f1_score(labels_topredict, predictions)
+
+            # If the validation loss is the best, save the validation 
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_val_acc = val_acc
+                best_val_f1 = val_f1
+                best_model_state_dict = model.state_dict().copy()
+
+            # Update the description of the epoch progress bar
+            train_progress_bar.set_postfix({
+                "Train Loss": train_loss,
+                "Val Loss": val_loss,
+                "Val Acc": val_acc,
+                "Val F1": val_f1,
+            })
+
+    return best_model_state_dict, best_val_loss, best_val_acc, best_val_f1
+
 
 
 def k_fold_rnn(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
