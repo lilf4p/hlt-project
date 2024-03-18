@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 from sklearn.model_selection import KFold
-from torch.utils.data import DataLoader, SubsetRandomSampler
+from torch.utils.data import DataLoader, SubsetRandomSampler, RandomSampler
 from sklearn.metrics import accuracy_score, f1_score
 
 def load_ECHR(path:str, anon:bool=False):
@@ -330,6 +330,39 @@ def k_fold_attention(model, criterion, optimizer, train_dataset, k_folds=5, epoc
         }
 
     return fold_results
+
+def train_attention(model, criterion, optimizer, train_dataset, epochs=10, batch_size=64):
+  # No KFold initialization or fold results dictionary
+
+  # Training loop
+  train_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
+
+  
+
+  train_sampler = RandomSampler(train_dataset)
+  train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
+
+  for epoch in train_progress_bar:
+    model.train()
+    running_loss = 0.0
+
+    loop = tqdm(train_loader, total=len(train_loader), leave=False)
+
+    for inputs, att_masks, labels in loop:
+      optimizer.zero_grad()
+      outputs = model(inputs, att_masks)
+      loss = criterion(outputs, labels.float())
+      loss.backward()
+      optimizer.step()
+      running_loss += loss.item()
+
+    train_loss = running_loss / len(train_loader)
+
+    # Update the description of the epoch progress bar
+    train_progress_bar.set_postfix({"Train Loss": train_loss})
+
+# No fold results to return
+
 
 def k_fold_rnn(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
 
