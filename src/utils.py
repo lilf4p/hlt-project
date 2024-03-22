@@ -1,13 +1,11 @@
+from torch.utils.data import Dataset
+import torch.nn.functional as F
+from src.echrdataset import ECHRDataset
+import torch
+import numpy as np
+import pandas as pd
 import json
 import os
-import pandas as pd
-import torch
-from tqdm import tqdm
-from sklearn.model_selection import KFold, train_test_split
-from torch.utils.data import DataLoader, SubsetRandomSampler, RandomSampler
-from sklearn.metrics import accuracy_score, f1_score
-from sklearn.model_selection import train_test_split
-from torch.utils.data import TensorDataset
 
 def load_ECHR(path:str, anon:bool=False):
 
@@ -230,302 +228,84 @@ def metrics_model(dataset, model):
   return predicted_labels,labels
 
 def reset_weights(m):
-  '''
-    Try resetting model weights to avoid
-    weight leakage.
-  '''
-  for layer in m.children():
-   if hasattr(layer, 'reset_parameters'):
-    print(f'Reset trainable parameters of layer = {layer}')
-    layer.reset_parameters()
-
-def k_fold_attention(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
-    kf = KFold(n_splits=k_folds, shuffle=True)
-
-    fold_results = {}
-
-    for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
-        print(f"Fold {fold}/{k_folds}")
-
-        reset_weights(model)
-
-        fold_results[fold] = {}
-
-        # Initialize tqdm progress bar for epochs
-        epoch_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
-
-        # Split dataset into train and validation for this fold
-        train_sampler = SubsetRandomSampler(train_indices)
-        val_sampler = SubsetRandomSampler(val_indices)
-
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
-        val_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=val_sampler)
-
-        best_val_loss = float('inf')
-        best_val_acc = 0.0
-        best_val_f1 = 0.0
-
-        fold_results[fold]['stats'] = {
-            'train_losses': [],
-            'val_losses': [],
-            'val_accs': [],
-            'val_f1s': []
-        }
-
-        for epoch in epoch_progress_bar:
-            model.train()
-            running_loss = 0.0
-
-            loop = tqdm(train_loader, total=len(train_loader), leave=False)
-
-            for inputs, att_masks, labels in loop:
-                optimizer.zero_grad()
-                outputs = model(inputs, att_masks)
-                loss = criterion(outputs, labels.float())
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-
-            train_loss = running_loss / len(train_loader)
-            with torch.no_grad():
-                model.eval()
-                val_running_loss = 0.0
-                predictions = []
-                labels_topredict = []
-
-                for inputs, att_masks, labels in val_loader:
-                    outputs = model(inputs, att_masks)
-                    val_loss = criterion(outputs, labels.float())
-                    val_running_loss += val_loss.item()
-                    predictions.append(torch.round(outputs).to('cpu'))
-                    labels_topredict.append(labels.to('cpu'))
-
-                predictions = torch.cat(predictions).numpy()
-                labels_topredict = torch.cat(labels_topredict).numpy()
-                val_loss = val_running_loss / len(val_loader)
-                val_acc = accuracy_score(labels_topredict, predictions)
-                val_f1 = f1_score(labels_topredict, predictions)
-
-                fold_results[fold]['stats']['train_losses'].append(train_loss)
-                fold_results[fold]['stats']['val_losses'].append(val_loss)
-                fold_results[fold]['stats']['val_accs'].append(val_acc)
-                fold_results[fold]['stats']['val_f1s'].append(val_f1)
-
-                # If the validation loss is the best, save the validation 
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_val_acc = val_acc
-                    best_val_f1 = val_f1
-
-            # Update the description of the epoch progress bar
-            epoch_progress_bar.set_postfix({
-                "Train Loss": train_loss,
-                "Val Loss": val_loss,
-                "Val Acc": val_acc,
-                "Val F1": val_f1,
-            })
-
-        fold_results[fold]['result'] = {
-            'best_val_loss': best_val_loss,
-            'best_val_acc': best_val_acc,
-            'best_val_f1': best_val_f1, 
-        }
-
-    return fold_results
-
-def train_attention(model, criterion, optimizer, train_dataset, epochs=10, batch_size=64):
-  
-    best_val_loss = float('inf')
-    best_val_acc = 0.0
-    best_val_f1 = 0.0
-
-    train_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
-
-    # split train dataset into train and validation
-    X_train, X_val, y_train, y_val = train_test_split(train_dataset.data, train_dataset.labels, test_size=0.05, random_state=42)
-
-    train = TensorDataset(X_train, y_train)
-    val = TensorDataset(X_val, y_val)
-
-    train_sampler = RandomSampler(train)
-    train_loader = DataLoader(train, batch_size=batch_size, sampler=train_sampler)
-
-    val_sampler = RandomSampler(val)
-    val_loader = DataLoader(val, batch_size=batch_size, sampler=val_sampler)
-
-    for epoch in train_progress_bar:
-        model.train()
-        running_loss = 0.0
-
-        loop = tqdm(train_loader, total=len(train_loader), leave=False)
-
-        for inputs, att_masks, labels in loop:
-            optimizer.zero_grad()
-            outputs = model(inputs, att_masks)
-            loss = criterion(outputs, labels.float())
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-
-        train_loss = running_loss / len(train_loader)
-
-        with torch.no_grad():
-            model.eval()
-            val_running_loss = 0.0
-            predictions = []
-            labels_topredict = []
-            
-            for inputs, att_masks, labels in val_loader:
-                outputs = model(inputs, att_masks)
-                val_loss = criterion(outputs, labels.float())
-                val_running_loss += val_loss.item()
-                predictions.append(torch.round(outputs).to('cpu'))
-                labels_topredict.append(labels.to('cpu'))
-            
-            predictions = torch.cat(predictions).numpy()
-            labels_topredict = torch.cat(labels_topredict).numpy()
-            val_loss = val_running_loss / len(val_loader)
-            val_acc = accuracy_score(labels_topredict, predictions)
-            val_f1 = f1_score(labels_topredict, predictions)
-
-            # If the validation loss is the best, save the validation 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_val_acc = val_acc
-                best_val_f1 = val_f1
-                best_model_state_dict = model.state_dict().copy()
-
-            # Update the description of the epoch progress bar
-            train_progress_bar.set_postfix({
-                "Train Loss": train_loss,
-                "Val Loss": val_loss,
-                "Val Acc": val_acc,
-                "Val F1": val_f1,
-            })
-
-    return best_model_state_dict, best_val_loss, best_val_acc, best_val_f1
-
-
-
-def k_fold_rnn(model, criterion, optimizer, train_dataset, k_folds=5, epochs=10, batch_size=64):
-
-    kf = KFold(n_splits=k_folds, shuffle=True)
-
-    fold_results = {}
-
-    for fold, (train_indices, val_indices) in enumerate(kf.split(train_dataset), start=1):
-        print(f"Fold {fold}/{k_folds}")
-
-        reset_weights(model)
-
-        fold_results[fold] = {}
-
-        # Initialize tqdm progress bar for epochs
-        epoch_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
-
-        # Split dataset into train and validation for this fold
-        train_sampler = SubsetRandomSampler(train_indices)
-        val_sampler = SubsetRandomSampler(val_indices)
-
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
-        val_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=val_sampler)
-
-        best_val_loss = float('inf')
-        best_val_acc = 0.0
-        best_val_f1 = 0.0
-
-        fold_results[fold]['stats'] = {
-            'train_losses': [],
-            'val_losses': [],
-            'val_accs': [],
-            'val_f1s': []
-        }
-
-        for epoch in epoch_progress_bar:
-            model.train()
-            running_loss = 0.0
-
-            loop = tqdm(train_loader, total=len(train_loader), leave=False)
-
-            for inputs, att_masks, labels in loop:
-                lengths = att_masks.sum(1)
-                optimizer.zero_grad()
-                outputs = model(inputs, lengths)
-                loss = criterion(outputs, labels.float())
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-
-            train_loss = running_loss / len(train_loader)
-
-            
-            model.eval()
-            with torch.no_grad():
-                val_running_loss = 0.0
-
-                predictions = []
-                labels_topredict = []
-
-                for inputs, att_masks, labels in val_loader:
-                    val_lengths = att_masks.sum(1)
-                    outputs = model(inputs, val_lengths)
-                    val_loss = criterion(outputs, labels.float())
-                    val_running_loss += val_loss.item()
-                    predictions.append(torch.round(outputs).to('cpu'))
-                    labels_topredict.append(labels.to('cpu'))
-
-                predictions = torch.cat(predictions).numpy()
-                labels_topredict = torch.cat(labels_topredict).numpy()
-                val_loss = val_running_loss / len(val_loader)
-                val_acc = accuracy_score(labels_topredict, predictions)
-                val_f1 = f1_score(labels_topredict, predictions)
-
-                fold_results[fold]['stats']['train_losses'].append(train_loss)
-                fold_results[fold]['stats']['val_losses'].append(val_loss)
-                fold_results[fold]['stats']['val_accs'].append(val_acc)
-                fold_results[fold]['stats']['val_f1s'].append(val_f1)
-
-                # If the validation loss is the best, save the validation 
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_val_acc = val_acc
-                    best_val_f1 = val_f1
-
-            # Update the description of the epoch progress bar
-            epoch_progress_bar.set_postfix({
-                "Train Loss": train_loss,
-                "Val Loss": val_loss,
-                "Val Acc": val_acc,
-                "Val F1": val_f1
-            })
-
-        fold_results[fold]['result'] = {
-            'fold': fold,
-            'best_val_loss': best_val_loss,
-            'best_val_acc': best_val_acc,
-            'best_val_f1': best_val_f1
-        }
-
-    return fold_results
-
-if __name__ == "__main__":
-    # test load_ECHR
-    df_train, df_dev, df_test = load_ECHR('ECHR_Dataset')
-    print(df_train)
-    print(df_dev)
-    print(df_test)
-
-    print(df_train['text'][0])
-
-    # test subsampling
-    #print(subsampling(df_train, n=10))
-    #print(subsampling(df_dev, n=10))
-    #print(subsampling(df_test, n=10))
- 
+        '''
+            Try resetting model weights to avoid
+            weight leakage.
+        '''
+        for layer in m.children():
+            if hasattr(layer, 'reset_parameters'):
+                print(f'Reset trainable parameters of layer = {layer}')
+                layer.reset_parameters()
+
+def get_device():
+    """
+    Get the device to run the model on.
+    Returns:
+        torch.device: The device to run the model on.
+    """
+    if (torch.cuda.is_available()):
+        print("Running on GPU")
+        device = torch.device('cuda', 1)
+    elif (torch.backends.mps.is_available()):
+        print("Running on MPS")
+        device = torch.device('mps')
+    else :
+        print("Running on CPU")
+        device = torch.device('cpu')
+    return device
+
+# pad the data to be of the same shape
+def __pad_data__(data, max_len):
+    padded_data = []
+    attention_masks = []
+    for i in range(len(data)):
+        attention_masks.append([1] * data[i].shape[0] + [0] * (max_len - data[i].shape[0]))
+        padded_data.append(F.pad(data[i], (0, 0, 0, max_len - data[i].shape[0])))
+    #print(len(attention_masks))
+    return torch.stack(padded_data), torch.tensor(attention_masks)
     
+def create_dataset(path_to_datasets):
     
+    # load data
+    train = torch.load('embeddings/legal-bert-base-uncased/emb_tr_cpu.pkl')
+    dev = torch.load('embeddings/legal-bert-base-uncased/emb_dev_cpu.pkl')
+    test = torch.load('embeddings/legal-bert-base-uncased/emb_test_cpu.pkl')
 
+    print('Train '+str(len(train)),'Dev '+str(len(dev)), 'Test '+str(len(test)))
+    
+    # concat dev to train series
+    train = np.concatenate((train, dev))
 
-   
+    print('Train + Dev = '+str(len(train)))
 
+    # load labels
+    train_labels = pd.read_pickle('embeddings/legal-bert-base-uncased/train_labels.pkl')
+    dev_labels = pd.read_pickle('embeddings/legal-bert-base-uncased/dev_labels.pkl')
+    test_labels = pd.read_pickle('embeddings/legal-bert-base-uncased/test_labels.pkl')
 
+    # concat dev labels to train labels
+    train_labels = torch.tensor(np.concatenate((train_labels, dev_labels)))
+
+    # pad the data
+    max_len_train = max([x.shape[0] for x in train])
+    max_len_test = max([x.shape[0] for x in test])
+    train, train_attention_masks = __pad_data__(train, max_len_train)
+    test, test_attention_masks = __pad_data__(test, max_len_test)
+
+    # create the datasets
+    train_dataset = ECHRDataset(train, train_attention_masks, train_labels)
+    test_dataset = ECHRDataset(test, test_attention_masks, test_labels)
+
+    print (train_dataset.data.device)
+
+    # save the datasets
+    if not os.path.exists(path_to_datasets):
+        os.makedirs(path_to_datasets)
+    torch.save(train_dataset, path_to_datasets+'train_dataset.pt')
+    torch.save(test_dataset, path_to_datasets+'test_dataset.pt')
+
+def load_dataset(path_to_datasets):
+    train_dataset = torch.load(path_to_datasets+'train_dataset.pt')
+    test_dataset = torch.load(path_to_datasets+'test_dataset.pt')
+    print(len(train_dataset))
+    return train_dataset, test_dataset
