@@ -156,7 +156,7 @@ class AttentionMLP(nn.Module):
         train_progress_bar = tqdm(range(epochs), desc="Epochs", unit="epoch")
 
         dataset_size = len(train_dataset)
-        val_size = int(0.05 * dataset_size)
+        val_size = int(0.1 * dataset_size)
         train_size = dataset_size - val_size
         train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size])
 
