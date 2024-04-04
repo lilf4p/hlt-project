@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from utils import load_ECHR
+from src.utils import load_ECHR
 import transformers
 from tqdm import tqdm
 def tokenize_document(row, tokenizer, max_length=512):
