@@ -1,7 +1,8 @@
 import torch
 import numpy as np
-from src.utils import load_ECHR
+from utils import load_ECHR
 import transformers
+import pandas as pd
 from tqdm import tqdm
 def tokenize_document(row, tokenizer, max_length=512):
     '''
@@ -44,7 +45,9 @@ def add_attention_masks(row):
 
 def tokenization_pipeline(tokenizer, path, max_length=512, anon=False, save=False):
     print('loading dataset')
-    df_train, df_dev, df_test = load_ECHR('../ECHR_Dataset', anon=anon)
+    df_train = pd.read_csv('/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset/train.csv')
+    df_dev = pd.read_csv('/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset/dev.csv')
+    df_test = pd.read_csv('/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset/test.csv')
     # tokenize the documents
     print('tokenizing')
     tqdm.pandas()
@@ -63,8 +66,8 @@ def tokenization_pipeline(tokenizer, path, max_length=512, anon=False, save=Fals
     return df_train, df_dev, df_test
 
 if __name__ == '__main__':
-    tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+    tokenizer = transformers.AutoTokenizer.from_pretrained('distilbert/distilbert-base-uncased')
 
-    tokenization_pipeline(tokenizer, '../ECHR_Dataset_Tokenized/legal-bert-base-uncased', max_length=512, anon=False, save=True)
+    tokenization_pipeline(tokenizer, '../ECHR_Dataset_Tokenized/distilbert-base-uncased', max_length=512, anon=False, save=True)
 
 
