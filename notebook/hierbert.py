@@ -142,18 +142,10 @@ class Hierbert(nn.Module):
 
         for i in range(max_l):
             bert_output.append(
-                self.bert(input_ids[:,i], attention_masks[:,i]).last_hidden_state
+                self.bert(input_ids[:,i], attention_masks[:,i]).last_hidden_state[:, 0, :]
             )
 
         bert_output = torch.stack(bert_output)
-
-        # You can access embeddings of specific tokens from the hidden states
-        # For example, to get the embedding of the first token ([CLS] token), you can do:
-        cls_embedding = hidden_states[:, 0, :]  # Extract the first token's embedding from all sequences
-
-        # cls_embedding now contains the embedding of the first token ([CLS] token) for all sequences in the batch
-
-        print(cls_embedding.shape)  # Shape of the extracted embedding
 
         print(bert_output.shape)
         sentence_mask = make_mask(input_ids, lengths).to('cuda')
