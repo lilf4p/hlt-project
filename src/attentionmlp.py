@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from copy import deepcopy
 from src.utils import reset_weights
+import numpy as np
 
 class AttentionMLP(nn.Module):
     def __init__(self, input_dim, hidden_sizes, dropout=0, weight_decay=0.01):
@@ -37,13 +38,11 @@ class AttentionMLP(nn.Module):
         if attention_mask is not None:
             attention_mask=attention_mask.unsqueeze(2)
 
-            non_normalized_attention = non_normalized_attention.masked_fill(attention_mask == 0, -1e9)
+            non_normalized_attention = non_normalized_attention.masked_fill(attention_mask == 0, np.finfo(np.float16).min)
         attention = F.softmax(non_normalized_attention, dim=1)
         # permute the attention to match the shape of the value
         attention = attention.permute(0, 2, 1)
-
         x = torch.matmul(attention, value)
-
         # mlp
         x = self.mlp(x)
         x = self.output(x)

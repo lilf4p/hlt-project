@@ -52,10 +52,11 @@ labels = df_train['label'].tolist()
 print(input_ids[0])
 print(type(input_ids[0]))
 
-def split_into_chunks(tensor):
+def split_into_chunks(tensor, max=10):
     max_length = tensor.size(0)
     chunks = []
     for i in range(0, max_length, 512):
+        if (len(chunks) >= max): break
         chunk = tensor[i:i+512]
         chunks.append(chunk)
     pad_size = (0, 512 - len(chunks[-1]))  # Calculate the pad size
@@ -100,14 +101,6 @@ class ECHRDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return self.input_ids[idx], self.attention_mask[idx], self.labels[idx], self.input_ids[idx].size(0) # last one is the length of the input_ids, used for padding
-    # create a dataset
-
-dataset = ECHRDataset(input_ids, attention_mask, labels)
-# create a dataloader
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
-# try to run the model
-#bert = BertModel.from_pretrained('nlpaueb/legal-bert-base-uncased')
-bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased")
 
 def make_mask(data, lengths, batch_first=True):
     if batch_first:
@@ -119,7 +112,7 @@ def make_mask(data, lengths, batch_first=True):
     mask = torch.zeros((max_length, batch_size), dtype=torch.bool)
 
     for i, l in enumerate(lengths):
-        mask[i, :l] = 1.
+        mask[:l, i] = 1.
 
     return mask
 
@@ -146,35 +139,53 @@ class Hierbert(nn.Module):
             )
 
         bert_output = torch.stack(bert_output)
-
         print(bert_output.shape)
+        bert_output[torch.isnan(bert_output)] = 0
         sentence_mask = make_mask(input_ids, lengths).to('cuda')
 
         return self.attention_mlp(bert_output.permute(1,0,2), sentence_mask.T)
-    
 
+dataset = ECHRDataset(input_ids, attention_mask, labels)
+# create a dataloader
+dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
+# try to run the model
+#bert = BertModel.from_pretrained('nlpaueb/legal-bert-base-uncased')
+bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased")
 
+accelerator = Accelerator(gradient_accumulation_steps=2)
 
-device = 'cuda'
-model = Hierbert(bert=bert, hidden_sizes=[768,2])
+model = Hierbert(bert=bert, hidden_sizes=[768, 128, 32])
+optimizer = Adam(model.parameters(), lr=0.00001)
 
-optimizer = Adam(model.parameters(), lr=0.001)
-accelerator = Accelerator()
-
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
 loss_function = torch.nn.BCELoss()
 
-model, optimizer, training_dataloader, scheduler = accelerator.prepare(
-     model, optimizer, dataloader, scheduler
+model, optimizer, training_dataloader = accelerator.prepare(
+     model, optimizer, dataloader
 )
 
-for batch in training_dataloader:
-    optimizer.zero_grad()
-    inputs, att, targets, l = batch
-    inputs = inputs
-    targets = targets
-    outputs = model(inputs, att, l)
-    loss = loss_function(outputs, targets.float())
-    accelerator.backward(loss)
-    optimizer.step()
-    scheduler.step()
+for epoch in range(0,10):
+    model.train()
+    for batch in training_dataloader:
+        optimizer.zero_grad()
+        inputs, att, targets, l = batch
+        outputs = model(inputs, att, l)
+        print(outputs)
+        print(targets)
+        loss = loss_function(outputs, targets.float())
+        print(loss)
+
+        accelerator.backward(loss)
+        optimizer.step()
+        
+        del inputs 
+        del att 
+        del targets 
+        del l
+        del outputs 
+        del loss
+        torch.cuda.empty_cache()
+
+    # compute train and val loss 
+    # do val
+
+torch.save(model, 'hierbert.pt')
