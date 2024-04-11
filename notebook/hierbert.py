@@ -49,8 +49,9 @@ input_ids = df_train['input_ids'].tolist()
 attention_mask = df_train['attention_mask'].tolist()
 labels = df_train['label'].tolist()
 
-print(input_ids[0])
-print(type(input_ids[0]))
+val_input_ids = df_dev['input_ids'].tolist()
+val_attention_mask = df_dev['attention_mask'].tolist()
+val_labels = df_dev['label'].tolist()
 
 def split_into_chunks(tensor, max=10):
     max_length = tensor.size(0)
@@ -68,6 +69,12 @@ attention_mask = [torch.stack(split_into_chunks(torch.tensor(i))) for i in atten
 input_ids =[torch.squeeze(i, dim=1) for i in input_ids]
 attention_mask =[torch.squeeze(i, dim=1) for i in attention_mask]
 lengths =[i.size(0) for i in input_ids]
+
+val_input_ids = [torch.stack(split_into_chunks(torch.tensor(i))) for i in val_input_ids]
+val_attention_mask = [torch.stack(split_into_chunks(torch.tensor(i))) for i in val_attention_mask]
+val_input_ids =[torch.squeeze(i, dim=1) for i in val_input_ids]
+val_attention_mask =[torch.squeeze(i, dim=1) for i in val_attention_mask]
+val_lengths =[i.size(0) for i in val_input_ids]
 
 def collate_fn(data):
     """
@@ -146,37 +153,43 @@ class Hierbert(nn.Module):
         return self.attention_mlp(bert_output.permute(1,0,2), sentence_mask.T)
 
 dataset = ECHRDataset(input_ids, attention_mask, labels)
+val_dataset = ECHRDataset(val_input_ids, val_attention_mask, val_labels)
+
 # create a dataloader
 dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
-# try to run the model
+val_dataloader = DataLoader(val_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
+
 #bert = BertModel.from_pretrained('nlpaueb/legal-bert-base-uncased')
-bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased")
+bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased") # distilbert-base-uncased instead of bert-base-uncased for memory issues
 
 accelerator = Accelerator(gradient_accumulation_steps=2)
 
-model = Hierbert(bert=bert, hidden_sizes=[768, 128, 32])
-optimizer = Adam(model.parameters(), lr=0.00001)
+model = Hierbert(bert=bert, hidden_sizes=[768, 16])
+optimizer = Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
 
 loss_function = torch.nn.BCELoss()
 
-model, optimizer, training_dataloader = accelerator.prepare(
-     model, optimizer, dataloader
+model, optimizer, training_dataloader, val_dataloader = accelerator.prepare(
+     model, optimizer, dataloader, val_dataloader
 )
 
-for epoch in range(0,10):
+from tqdm import tqdm
+from sklearn.metrics import f1_score
+
+best_val_loss = np.inf
+best_model = None
+
+for epoch in range(4):
     model.train()
-    for batch in training_dataloader:
+    train_loss = 0
+    for batch in tqdm(training_dataloader, desc=f"Training Epoch {epoch}"):
         optimizer.zero_grad()
         inputs, att, targets, l = batch
         outputs = model(inputs, att, l)
-        print(outputs)
-        print(targets)
         loss = loss_function(outputs, targets.float())
-        print(loss)
-
         accelerator.backward(loss)
         optimizer.step()
-        
+        train_loss += loss.item()
         del inputs 
         del att 
         del targets 
@@ -185,7 +198,34 @@ for epoch in range(0,10):
         del loss
         torch.cuda.empty_cache()
 
-    # compute train and val loss 
-    # do val
+    model.eval()
+    val_loss = 0
+    val_accuracy = 0
+    with torch.no_grad():
+        for batch in tqdm(val_dataloader, desc=f"Validation Epoch {epoch}"):
+            inputs, att, targets, l = batch
+            outputs = model(inputs, att, l)
+            loss = loss_function(outputs, targets.float())
+            val_loss += loss.item()
+            outputs = torch.round(outputs)
+            accuracy = f1_score(targets.cpu().numpy(), outputs.cpu().numpy(), average='weighted')
+            val_accuracy += accuracy
+            del inputs
+            del att
+            del targets
+            del l
+            del outputs
+            del loss
+            torch.cuda.empty_cache()
 
-torch.save(model, 'hierbert.pt')
+    train_loss = train_loss / len(training_dataloader)
+    val_loss = val_loss / len(val_dataloader)
+    val_accuracy = val_accuracy / len(val_dataloader)
+    # update progress bar 
+    print(f"Epoch {epoch} - Train Loss: {train_loss} - Val Loss: {val_loss} - Val F1: {val_accuracy}")
+
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        best_model = model.state_dict()
+
+torch.save(best_model, 'hierbert.pt')
