@@ -80,6 +80,17 @@ val_input_ids =[torch.squeeze(i, dim=1) for i in val_input_ids]
 val_attention_mask =[torch.squeeze(i, dim=1) for i in val_attention_mask]
 val_lengths =[i.size(0) for i in val_input_ids]
 
+# test data 
+test_input_ids = df_test['input_ids'].tolist()
+test_attention_mask = df_test['attention_mask'].tolist()
+test_labels = df_test['label'].tolist()
+
+test_input_ids = [torch.stack(split_into_chunks(torch.tensor(i))) for i in test_input_ids]
+test_attention_mask = [torch.stack(split_into_chunks(torch.tensor(i))) for i in test_attention_mask]
+test_input_ids =[torch.squeeze(i, dim=1) for i in test_input_ids]
+test_attention_mask =[torch.squeeze(i, dim=1) for i in test_attention_mask]
+test_lengths =[i.size(0) for i in test_input_ids]
+
 def collate_fn(data):
     """
        data: is a list of tuples with (input_ids, attention mask, label, length)
@@ -163,18 +174,23 @@ val_dataset = ECHRDataset(val_input_ids, val_attention_mask, val_labels)
 dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
 val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
 
+test_dataset = ECHRDataset(test_input_ids, test_attention_mask, test_labels)
+test_dataloader = DataLoader(test_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
+
 #bert = BertModel.from_pretrained('nlpaueb/legal-bert-base-uncased')
 bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased") # distilbert-base-uncased instead of bert-base-uncased for memory issues
 
-accelerator = Accelerator(gradient_accumulation_steps=2)
+accelerator = Accelerator(gradient_accumulation_steps=32)
 
-model = Hierbert(bert=bert, hidden_sizes=[768, 16])
-optimizer = Adam(model.parameters(), lr=0.001)
+model = Hierbert(bert=bert, hidden_sizes=[768, 128, 64, 32])
+optimizer = Adam(model.parameters(), lr=0.0001)
 
 loss_function = torch.nn.BCELoss()
 
-model, optimizer, training_dataloader, val_dataloader = accelerator.prepare(
-     model, optimizer, dataloader, val_dataloader
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
+
+model, optimizer, scheduler, training_dataloader, val_dataloader, test_dataloader = accelerator.prepare(
+     model, optimizer, scheduler, dataloader, val_dataloader, test_dataloader
 )
 
 from tqdm import tqdm
@@ -186,27 +202,31 @@ best_model = None
 for epoch in range(4):
     model.train()
     train_loss = 0
-    for batch in tqdm(training_dataloader, desc=f"Training Epoch {epoch}"):
-        optimizer.zero_grad()
-        inputs, att, targets, l = batch
-        outputs = model(inputs, att, l)
-        loss = loss_function(outputs, targets.float())
-        accelerator.backward(loss)
-        optimizer.step()
-        train_loss += loss.item()
-        del inputs 
-        del att 
-        del targets 
-        del l
-        del outputs 
-        del loss
-        torch.cuda.empty_cache()
+    train_bar = tqdm(training_dataloader, desc=f"Training Epoch {epoch}")
+    for batch in train_bar:
+        with accelerator.accumulate(model):  
+            optimizer.zero_grad()
+            inputs, att, targets, l = batch
+            outputs = model(inputs, att, l)
+            loss = loss_function(outputs, targets.float())
+            accelerator.backward(loss)
+            optimizer.step()
+            train_loss += loss.item()
+            train_bar.set_postfix({'loss': train_loss / len(training_dataloader)})
+            del inputs 
+            del att 
+            del targets 
+            del l
+            del outputs 
+            del loss
+            torch.cuda.empty_cache()
 
     model.eval()
     val_loss = 0
     val_accuracy = 0
+    val_bar = tqdm(val_dataloader, desc=f"Validation Epoch {epoch}")
     with torch.no_grad():
-        for batch in tqdm(val_dataloader, desc=f"Validation Epoch {epoch}"):
+        for batch in val_bar:
             inputs, att, targets, l = batch
             outputs = model(inputs, att, l)
             loss = loss_function(outputs, targets.float())
@@ -214,6 +234,7 @@ for epoch in range(4):
             outputs = torch.round(outputs)
             accuracy = f1_score(targets.cpu().numpy(), outputs.cpu().numpy(), average='weighted')
             val_accuracy += accuracy
+            val_bar.set_postfix({'loss': val_loss / len(val_dataloader), 'f1': val_accuracy / len(val_dataloader)})
             del inputs
             del att
             del targets
@@ -225,28 +246,16 @@ for epoch in range(4):
     train_loss = train_loss / len(training_dataloader)
     val_loss = val_loss / len(val_dataloader)
     val_accuracy = val_accuracy / len(val_dataloader)
-    # update progress bar 
+
     print(f"Epoch {epoch} - Train Loss: {train_loss} - Val Loss: {val_loss} - Val F1: {val_accuracy}")
 
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         best_model = model.state_dict()
 
+    scheduler.step()
+
 torch.save(best_model, 'hierbert.pt')
-
-# test the model
-test_input_ids = df_test['input_ids'].tolist()
-test_attention_mask = df_test['attention_mask'].tolist()
-test_labels = df_test['label'].tolist()
-
-test_input_ids = [torch.stack(split_into_chunks(torch.tensor(i))) for i in test_input_ids]
-test_attention_mask = [torch.stack(split_into_chunks(torch.tensor(i))) for i in test_attention_mask]
-test_input_ids =[torch.squeeze(i, dim=1) for i in test_input_ids]
-test_attention_mask =[torch.squeeze(i, dim=1) for i in test_attention_mask]
-test_lengths =[i.size(0) for i in test_input_ids]
-
-test_dataset = ECHRDataset(test_input_ids, test_attention_mask, test_labels)
-test_dataloader = DataLoader(test_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
 
 # load the best model
 model.load_state_dict(torch.load('hierbert.pt'))
