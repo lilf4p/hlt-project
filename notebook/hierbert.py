@@ -12,12 +12,13 @@ from torch.utils.data import DataLoader
 import torch
 
 from transformers import BertModel, AutoModel, AutoTokenizer
+from datasets import Dataset
 
 import sys
 sys.path.append('..')
 from src.attentionmlp import AttentionMLP
 
-tokenize_data = True
+tokenize_data = False
 
 if tokenize_data:
 
@@ -34,7 +35,6 @@ if tokenize_data:
     def preprocess_function(examples):
         return tokenizer(examples["text"], padding=False)
 
-    from datasets import Dataset
     df_train = Dataset.from_pandas(df_train)
     df_dev = Dataset.from_pandas(df_dev)
     df_test = Dataset.from_pandas(df_test)
@@ -47,7 +47,19 @@ if tokenize_data:
     df_dev = df_dev.with_format(type = "pandas", columns= ['input_ids', 'attention_mask', 'label'])
     df_test = df_test.with_format(type = "pandas", columns= ['input_ids', 'attention_mask', 'label'])
 
-    # save the tokenized data to csv files
+    # save a pythorch dataset in pkl
+    df_train.save_to_disk('/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset_Tokenized/distilbert-base-uncased/train_tokenized')
+    df_dev.save_to_disk('/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset_Tokenized/distilbert-base-uncased/dev_tokenized')
+    df_test.save_to_disk('/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset_Tokenized/distilbert-base-uncased/test_tokenized')
+
+# load tokenized data
+path_train = '/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset_Tokenized/distilbert-base-uncased/train_tokenized'
+path_dev = '/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset_Tokenized/distilbert-base-uncased/dev_tokenized'
+path_test = '/storagenfs/l.stoppani/hlt-project/hlt-project/ECHR_Dataset_Tokenized/distilbert-base-uncased/test_tokenized'
+
+df_train = Dataset.load_from_disk(path_train)
+df_dev = Dataset.load_from_disk(path_dev)
+df_test = Dataset.load_from_disk(path_test)
 
 input_ids = df_train['input_ids'].tolist()
 attention_mask = df_train['attention_mask'].tolist()
@@ -57,7 +69,7 @@ val_input_ids = df_dev['input_ids'].tolist()
 val_attention_mask = df_dev['attention_mask'].tolist()
 val_labels = df_dev['label'].tolist()
 
-def split_into_chunks(tensor, max=10):
+def split_into_chunks(tensor, max=2):
     max_length = tensor.size(0)
     chunks = []
     for i in range(0, max_length, 512):
@@ -143,6 +155,7 @@ class Hierbert(nn.Module):
     def __init__(self, hidden_sizes ):
         super(Hierbert, self).__init__()
         self.bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased") # distilbert-base-uncased instead of bert-base-uncased for memory issues
+        self.bert2 = AutoModel.from_pretrained("distilbert/distilbert-base-uncased")
         self.attention_mlp = AttentionMLP(768, hidden_sizes)
 
     def forward(self, input_ids, attention_masks, lengths, bert_require_grad=True):
@@ -151,21 +164,31 @@ class Hierbert(nn.Module):
         bert_output = []
 
         if bert_require_grad:
-            self.bert.train()
+            for param in self.bert.parameters():
+                param.requires_grad = True
+            for param in self.bert2.parameters():
+                param.requires_grad = True
         else:
-            self.bert.eval()
+            for param in self.bert.parameters():
+                param.requires_grad = False
+            for param in self.bert2.parameters():
+                param.requires_grad = False
 
-        for i in range(max_l):
-            bert_output.append(
-                self.bert(input_ids[:,i], attention_masks[:,i]).last_hidden_state[:, 0, :]
-            )
-
-        bert_output = torch.stack(bert_output)
+        bert_output1 = self.bert(input_ids[:,0], attention_masks[:,0]).last_hidden_state[:, 0, :]
+        bert_output1[torch.isnan(bert_output1)] = 0
+        if (max_l > 1):
+            bert_output2 = self.bert2(input_ids[:,1], attention_masks[:,1]).last_hidden_state[:, 0, :]
+            bert_output2[torch.isnan(bert_output2)] = 0
+            # make a single tensor with batch size x chunk size x hidden size
+            bert_output = torch.stack([bert_output1, bert_output2], dim=1)
+        else:
+            bert_output = bert_output1.unsqueeze(1)
         #print(bert_output.shape)
-        bert_output[torch.isnan(bert_output)] = 0
         sentence_mask = make_mask(input_ids, lengths).to('cuda')
-
-        return self.attention_mlp(bert_output.permute(1,0,2), sentence_mask.T)
+        #return self.attention_mlp(bert_output.permute(1,0,2), sentence_mask.T)
+        # add a dim to the bert output
+        #bert_output = bert_output.unsqueeze(0)
+        return self.attention_mlp(bert_output, sentence_mask.T)
 
 dataset = ECHRDataset(input_ids, attention_mask, labels)
 val_dataset = ECHRDataset(val_input_ids, val_attention_mask, val_labels)
@@ -180,9 +203,12 @@ test_dataloader = DataLoader(test_dataset, batch_size=2, shuffle=True, collate_f
 accelerator = Accelerator(gradient_accumulation_steps=32)
 
 model = Hierbert(hidden_sizes=[768, 128, 64, 32])
-optimizer = Adam(model.parameters(), lr=0.0001)
+optimizer = Adam(model.parameters(), lr=1e-6)
 
-print(model.parameters())
+# print the model
+print(model)
+# print the number of parameters
+print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
 loss_function = torch.nn.BCELoss()
 
@@ -201,7 +227,7 @@ best_model = None
 for epoch in range(4):
     model.train()
     train_loss = 0
-    train_bar = tqdm(training_dataloader, desc=f"Training Epoch {epoch}")
+    train_bar = tqdm(training_dataloader, desc=f"Training Epoch {epoch}", position=0, leave=True)
     for batch in train_bar:
         with accelerator.accumulate(model):  
             optimizer.zero_grad()
@@ -251,10 +277,10 @@ for epoch in range(4):
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         best_model = model.state_dict()
+    
+    torch.save(best_model, 'hierbert.pt')
 
     scheduler.step()
-
-torch.save(best_model, 'hierbert.pt')
 
 # load the best model
 model.load_state_dict(torch.load('hierbert.pt'))
