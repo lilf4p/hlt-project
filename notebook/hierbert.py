@@ -140,9 +140,9 @@ def make_mask(data, lengths, batch_first=True):
 
 
 class Hierbert(nn.Module):
-    def __init__(self, bert, hidden_sizes ):
+    def __init__(self, hidden_sizes ):
         super(Hierbert, self).__init__()
-        self.bert = bert
+        self.bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased") # distilbert-base-uncased instead of bert-base-uncased for memory issues
         self.attention_mlp = AttentionMLP(768, hidden_sizes)
 
     def forward(self, input_ids, attention_masks, lengths, bert_require_grad=True):
@@ -177,13 +177,12 @@ val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, collate_fn=
 test_dataset = ECHRDataset(test_input_ids, test_attention_mask, test_labels)
 test_dataloader = DataLoader(test_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
 
-#bert = BertModel.from_pretrained('nlpaueb/legal-bert-base-uncased')
-bert = AutoModel.from_pretrained("distilbert/distilbert-base-uncased") # distilbert-base-uncased instead of bert-base-uncased for memory issues
-
 accelerator = Accelerator(gradient_accumulation_steps=32)
 
-model = Hierbert(bert=bert, hidden_sizes=[768, 128, 64, 32])
+model = Hierbert(hidden_sizes=[768, 128, 64, 32])
 optimizer = Adam(model.parameters(), lr=0.0001)
+
+print(model.parameters())
 
 loss_function = torch.nn.BCELoss()
 
@@ -228,7 +227,7 @@ for epoch in range(4):
     with torch.no_grad():
         for batch in val_bar:
             inputs, att, targets, l = batch
-            outputs = model(inputs, att, l)
+            outputs = model(inputs, att, l, bert_require_grad=False)
             loss = loss_function(outputs, targets.float())
             val_loss += loss.item()
             outputs = torch.round(outputs)
@@ -266,7 +265,7 @@ test_accuracy = 0
 with torch.no_grad():
     for batch in tqdm(test_dataloader, desc=f"Test"):
         inputs, att, targets, l = batch
-        outputs = model(inputs, att, l)
+        outputs = model(inputs, att, l, bert_require_grad=False)
         loss = loss_function(outputs, targets.float())
         test_loss += loss.item()
         outputs = torch.round(outputs)
