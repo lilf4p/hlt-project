@@ -2,52 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import BertModel, BertTokenizer
 import pandas as pd
-import torch.utils
-
-tokenizer = BertTokenizer.from_pretrained('nlpaueb/legal-bert-base-uncased')
-class BertAttentionClassifier(nn.Module):
-    def __init__(self, num_chunks, max_length, bert_model_name='nlpaueb/legal-bert-base-uncased'):
-        super(BertAttentionClassifier, self).__init__()
-        self.num_chunks = num_chunks
-        self.max_length = max_length
-        
-        # Load pre-trained BERT model and tokenizer
-        self.bert = BertModel.from_pretrained(bert_model_name)
-        
-        # Attention layer
-        self.attention = nn.MultiheadAttention(embed_dim=self.bert.config.hidden_size, num_heads=1)
-        
-        # Linear layer for classification
-        self.fc = nn.Linear(self.bert.config.hidden_size, 1)
-        
-    def forward(self, input_ids, attention_mask):
-        # Tokenize and encode each text chunk using BERT tokenizer
-        
-        
-        # Extract BERT outputs (last hidden states)
-        bert_outputs = [self.bert( ids, mask).pooler_output
-                        for (ids, mask)  in zip(input_ids, attention_mask)]
-    
-        # Stack BERT outputs along the sequence dimension
-        stacked_outputs = torch.stack(bert_outputs, dim=1)  # shape: (batch_size, num_chunks, hidden_size)
-        
-        # Apply attention across all BERT outputs
-        attention_output, _ = self.attention(stacked_outputs.transpose(0, 1),  # (num_chunks, batch_size, hidden_size)
-                                             stacked_outputs.transpose(0, 1),  # (num_chunks, batch_size, hidden_size)
-                                             stacked_outputs.transpose(0, 1))  # (num_chunks, batch_size, hidden_size)
-        
-        # Average pooling over the sequence dimension (num_chunks)
-        pooled_output = attention_output.mean(dim=0)  # (batch_size, max_length, hidden_size)
-        
-        # Apply linear layer for classification
-        logits = self.fc(pooled_output)  # (batch_size, max_length, 1)
-        
-        # Squeeze logits to remove extra dimension
-        logits = logits.squeeze(dim=-1)  # (batch_size, max_length)
-        
-        return logits
-
-
+from tqdm import tqdm
 
 # load tokenized data
 path_dev ='../ECHR_Dataset_Tokenized/legal-bert-base-uncased/df_dev_tokenized.pkl'
@@ -97,28 +52,27 @@ lengths_dev =[i.size(0) for i in input_ids_dev]
 
 lengths_test =[i.size(0) for i in input_ids_test]
 def collate_fn(data, max_chunks=3):
-   """
-   data: is a list of tuples with (input_ids, attention mask, label, length)
-   """
-   input_ids = [i[0] for i in data][:max_chunks]
-   attention_mask = [i[1] for i in data][:max_chunks]
-   labels = [i[2] for i in data]
-   lengths = [i[3] for i in data]
+    input_ids = [i[0] for i in data]
+    attention_mask = [i[1] for i in data]
+    labels = [i[2] for i in data]
+    lengths = [i[3] for i in data]
 
 
-   labels = torch.tensor(labels)
-   lengths = torch.tensor(lengths)
-   max_length = torch.max(lengths)
-   max_length = torch.min(max_length, max_chunks * torch.ones_like(max_length))
-   print(max_length)
-   # truncate input_ids and attention_mask to max_length
-   input_ids = [i[:max_length] for i in input_ids]
-   attention_mask = [i[:max_length] for i in attention_mask]
-   # pad input_ids and attention_mask to max_length
-   input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
-   attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
-   
-   return input_ids, attention_mask, labels, lengths
+    labels = torch.tensor(labels)
+    lengths = torch.tensor(lengths)
+    max_length = torch.max(lengths)
+    max_length = torch.min(max_length, max_chunks * torch.ones_like(max_length))
+    # truncate input_ids and attention_mask to max_length
+    input_ids = [i[:max_length] for i in input_ids]
+    attention_mask = [i[:max_length] for i in attention_mask]
+    lengths = torch.min(lengths, max_chunks*torch.ones_like(lengths))
+    # pad the input_ids and attention_mask so that they have the same length [max_length, 512]
+    for i in range(len(input_ids)):
+        pad = torch.zeros((max_length - lengths[i],512), dtype=torch.long)
+        input_ids[i] = torch.cat((input_ids[i], pad), dim=0, )
+        attention_mask[i] = torch.cat((attention_mask[i], pad), dim=0)
+
+    return torch.stack(input_ids), torch.stack(attention_mask), labels, lengths
 
 
 class ECHRDataset(torch.utils.data.Dataset):
@@ -138,15 +92,137 @@ eval_dataset = ECHRDataset(input_ids_dev, attention_mask_dev, labels_dev)
 test_dataset = ECHRDataset(input_ids_test, attention_mask_test, labels_test)
 # number of samples
 print(len(dataset))
-# create a dataloader
-collate_fn_10 = lambda x: collate_fn(x, 10)
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True, collate_fn=collate_fn_10)
-eval_dataloader = torch.utils.data.DataLoader(eval_dataset, batch_size=10, shuffle=True, collate_fn=collate_fn_10)
-test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=10, shuffle=True, collate_fn=collate_fn_10)
 # make a subset of the dataset
 
+collate_fn_10 = lambda x: collate_fn(x, 4)
 
-subset = torch.utils.data.Subset(dataset, range(100))
-dataloader = torch.utils.data.DataLoader(subset, batch_size=8, shuffle=True, collate_fn=collate_fn_10)
-eval_subset = torch.utils.data.Subset(eval_dataset, range(100))
-eval_dataloader = torch.utils.data.DataLoader(eval_subset, batch_size=4, shuffle=True, collate_fn=collate_fn)
+dataloader = torch.utils.data.DataLoader(dataset, batch_size=3, shuffle=True, collate_fn=collate_fn_10)
+eval_dataloader = torch.utils.data.DataLoader(eval_dataset, batch_size=16, shuffle=True, collate_fn=collate_fn_10)
+x=next(iter(eval_dataloader))
+print(x[0].shape, x[1].shape, x[2].shape, x[3].shape)
+model_name = 'prajjwal1/bert-small'
+tokenizer = BertTokenizer.from_pretrained(model_name)
+class BertAttentionClassifier(nn.Module):
+    def __init__(self, num_chunks, max_length, bert_model_name='nlpaueb/legal-bert-base-uncased'):
+        super(BertAttentionClassifier, self).__init__()
+        self.num_chunks = num_chunks
+        self.max_length = max_length
+        
+        # Load pre-trained BERT model and tokenizer
+        self.bert = BertModel.from_pretrained(bert_model_name)
+        
+        # Attention layer
+        self.attention = nn.MultiheadAttention(embed_dim=self.bert.config.hidden_size, num_heads=1)
+        self.relu=nn.ReLU()
+        # Linear layer for classification
+        self.fc = nn.Linear(self.bert.config.hidden_size, 1)
+        
+    def forward(self, input_ids, attention_mask):
+        # Tokenize and encode each text chunk using BERT tokenizer
+        
+        # Extract BERT outputs (last hidden states)
+        
+        bert_outputs = [self.bert( ids, mask).pooler_output
+                            for (ids, mask)  in zip(input_ids, attention_mask)]
+    
+        # Stack BERT outputs along the sequence dimension
+        stacked_outputs = torch.stack(bert_outputs, dim=1)  # shape: (batch_size, num_chunks, hidden_size)
+
+        # Apply attention across all BERT outputs
+        attention_output, _ = self.attention(stacked_outputs,  # (num_chunks, batch_size, hidden_size)
+                                             stacked_outputs,  # (num_chunks, batch_size, hidden_size)
+                                             stacked_outputs)  # (num_chunks, batch_size, hidden_size)
+        attention_output = self.relu(attention_output)
+        # Average pooling over the sequence dimension (num_chunks)
+        pooled_output = attention_output.mean(dim=0)  # (batch_size, max_length, hidden_size)
+
+        # Apply linear layer for classification
+        logits = self.fc(pooled_output)  # (batch_size, 1)
+        
+        # Squeeze logits to remove extra dimension
+        logits = logits.squeeze(dim=-1)  # (batch_size, max_length)
+        
+        return logits
+
+
+
+# train the model
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+model = BertAttentionClassifier(num_chunks=3, max_length=10, bert_model_name='nlpaueb/legal-bert-base-uncased')
+model.to(device)
+criterion = nn.BCEWithLogitsLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=3e-6)
+num_epochs=2
+best_loss = float('inf')
+
+for epoch in range(num_epochs):
+    model.train()
+    total_loss = 0
+    total_samples = 0
+    correct_samples = 0
+    train_bar = tqdm(dataloader)
+    for i, (input_ids_batch, attention_mask_batch, labels_batch, lengths_batch) in enumerate(train_bar):
+        optimizer.zero_grad()
+        logits = model(input_ids_batch.to(device), attention_mask_batch.to(device))
+        loss = criterion(logits, labels_batch.float().to(device))
+        loss.backward()
+       
+        optimizer.step()
+        train_bar.set_description(f'Epoch {epoch}')
+        total_loss += loss.item() *  len(labels_batch)
+        total_samples += len(labels_batch)
+       
+
+        # compute the accuracy
+        predictions = (logits > 0).long()
+        correct_samples += (predictions == labels_batch.to(device)).sum().item()
+        accuracy = correct_samples / total_samples
+        average_loss = total_loss / total_samples
+        train_bar.set_postfix({'loss': f'{average_loss}',  'accuracy': f'{accuracy}'})
+
+    # evaluate the model
+    model.eval()
+    total_loss = 0
+    total_samples = 0
+    correct_samples = 0
+    with torch.no_grad():
+        for input_ids, attention_mask, labels, lengths in eval_dataloader:
+            # compute the model output
+            logits = model(input_ids.to(device), attention_mask.to(device))
+            # compute the loss
+            loss = criterion(logits, labels.float().to(device))
+            total_loss += loss.item()
+            total_samples += len(labels)
+            # compute the accuracy
+            predictions = (logits > 0).long()
+            correct_samples += (predictions == labels.to(device)).sum().item()
+    accuracy = correct_samples / total_samples
+    average_loss = total_loss / len(eval_dataloader)
+    print(f'Accuracy: {accuracy}, Average Loss: {average_loss}', f'corretti: {correct_samples}')
+    # keep the best model
+    if average_loss < best_loss:
+        best_loss = average_loss
+        torch.save(model.state_dict(), 'best_model.pth')
+
+
+
+# evaluate the model
+model.eval()
+total_loss = 0
+total_samples = 0
+correct_samples = 0
+with torch.no_grad():
+    for input_ids, attention_mask, labels, lengths in eval_dataloader:
+        # compute the model output
+        logits = model(input_ids.to('cuda'), attention_mask.to('cuda'))
+        # compute the loss
+        loss = criterion(logits, labels.float().to('cuda'))
+        total_loss += loss.item()
+        total_samples += len(labels)
+        # compute the accuracy
+        predictions = (logits > 0).long()
+        correct_samples += (predictions == labels.to('cuda')).sum().item()
+accuracy = correct_samples / total_samples
+average_loss = total_loss / len(eval_dataloader)
+print(f'Accuracy: {accuracy}, Average Loss: {average_loss}', f'corretti {correct_samples}')
