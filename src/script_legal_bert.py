@@ -3,7 +3,8 @@ import torch.nn as nn
 from transformers import BertModel, BertTokenizer
 import pandas as pd
 from tqdm import tqdm
-
+from bert_attention import BertAttentionClassifier
+from utils import collate_fn_chunks
 # load tokenized data
 path_dev ='../ECHR_Dataset_Tokenized/legal-bert-base-uncased/df_dev_tokenized.pkl'
 path_train ='../ECHR_Dataset_Tokenized/legal-bert-base-uncased/df_train_tokenized.pkl'
@@ -51,28 +52,7 @@ lengths =[i.size(0) for i in input_ids]
 lengths_dev =[i.size(0) for i in input_ids_dev]
 
 lengths_test =[i.size(0) for i in input_ids_test]
-def collate_fn_chunks(data, max_chunks=3):
-    input_ids = [i[0] for i in data]
-    attention_mask = [i[1] for i in data]
-    labels = [i[2] for i in data]
-    lengths = [i[3] for i in data]
 
-
-    labels = torch.tensor(labels)
-    lengths = torch.tensor(lengths)
-    max_length = torch.max(lengths)
-    max_length = torch.min(max_length, max_chunks * torch.ones_like(max_length))
-    # truncate input_ids and attention_mask to max_length
-    input_ids = [i[:max_length] for i in input_ids]
-    attention_mask = [i[:max_length] for i in attention_mask]
-    lengths = torch.min(lengths, max_chunks*torch.ones_like(lengths))
-    # pad the input_ids and attention_mask so that they have the same length [max_length, 512]
-    for i in range(len(input_ids)):
-        pad = torch.zeros((max_length - lengths[i],512), dtype=torch.long)
-        input_ids[i] = torch.cat((input_ids[i], pad), dim=0, )
-        attention_mask[i] = torch.cat((attention_mask[i], pad), dim=0)
-
-    return torch.stack(input_ids), torch.stack(attention_mask), labels, lengths
 
 
 class ECHRDataset(torch.utils.data.Dataset):
@@ -96,47 +76,6 @@ print(len(dataset))
 
 
 
-class BertAttentionClassifier(nn.Module):
-
-    def __init__(self, bert_model_name='nlpaueb/legal-bert-base-uncased'):
-        super(BertAttentionClassifier, self).__init__()
-        
-        
-        # Load pre-trained BERT model and tokenizer
-        self.bert = BertModel.from_pretrained(bert_model_name)
-        
-        # Attention layer
-        self.attention = nn.MultiheadAttention(embed_dim=self.bert.config.hidden_size, num_heads=1)
-        self.relu=nn.ReLU()
-        # Linear layer for classification
-        self.fc = nn.Linear(self.bert.config.hidden_size, 1)
-        
-    def forward(self, input_ids, attention_mask):
-        # Tokenize and encode each text chunk using BERT tokenizer
-        
-        # Extract BERT outputs (last hidden states)
-        
-        bert_outputs = [self.bert( ids, mask).pooler_output
-                            for (ids, mask)  in zip(input_ids, attention_mask)]
-    
-        # Stack BERT outputs along the sequence dimension
-        stacked_outputs = torch.stack(bert_outputs, dim=1)  # shape: (batch_size, num_chunks, hidden_size)
-
-        # Apply attention across all BERT outputs
-        attention_output, _ = self.attention(stacked_outputs,  # (num_chunks, batch_size, hidden_size)
-                                             stacked_outputs,  # (num_chunks, batch_size, hidden_size)
-                                             stacked_outputs)  # (num_chunks, batch_size, hidden_size)
-        attention_output = self.relu(attention_output)
-        # Average pooling over the sequence dimension (num_chunks)
-        pooled_output = attention_output.mean(dim=0)  # (batch_size, max_length, hidden_size)
-
-        # Apply linear layer for classification
-        logits = self.fc(pooled_output)  # (batch_size, 1)
-        
-        # Squeeze logits to remove extra dimension
-        logits = logits.squeeze(dim=-1)  # (batch_size, max_length)
-        
-        return logits
 
 n_chunks=4 # number of chunks to consider
 batch_size = 4 
@@ -166,13 +105,13 @@ for epoch in range(num_epochs):
     train_bar = tqdm(dataloader)
     for i, (input_ids_batch, attention_mask_batch, labels_batch, lengths_batch) in enumerate(train_bar):
         logits = model(input_ids_batch.to(device), attention_mask_batch.to(device))
-        loss = criterion(logits, labels_batch.float().to(device))
+        loss = criterion(logits, labels_batch.float().to(device)) / update_epochs # compute the loss
         loss.backward()
         if ((i +1) % update_epochs ==0) or (i+1 ==len(dataloader)): 
             optimizer.step()
             optimizer.zero_grad()
         train_bar.set_description(f'Epoch {epoch}')
-        total_loss += loss.item() *  len(labels_batch)
+        total_loss += loss.item() *  len(labels_batch) * update_epochs # total running loss for visualizing it
         total_samples += len(labels_batch)
     
 
@@ -195,7 +134,7 @@ for epoch in range(num_epochs):
             # compute the model output
             logits = model(input_ids.to(device), attention_mask.to(device))
             # compute the loss
-            loss = criterion(logits, labels.float().to(device))
+            loss = criterion(logits, labels.float().to(device)) 
             total_loss += loss.item()
             total_samples += len(labels)
             # compute the accuracy

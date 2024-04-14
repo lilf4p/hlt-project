@@ -1,6 +1,6 @@
 from torch.utils.data import Dataset
 import torch.nn.functional as F
-from src.echrdataset import ECHRDataset
+from echrdataset import ECHRDataset
 import torch
 import numpy as np
 import pandas as pd
@@ -309,3 +309,27 @@ def load_dataset(path_to_datasets):
     test_dataset = torch.load(path_to_datasets+'test_dataset.pt')
     print(len(train_dataset))
     return train_dataset, test_dataset
+
+
+def collate_fn_chunks(data, max_chunks=3):
+    input_ids = [i[0] for i in data]
+    attention_mask = [i[1] for i in data]
+    labels = [i[2] for i in data]
+    lengths = [i[3] for i in data]
+
+
+    labels = torch.tensor(labels)
+    lengths = torch.tensor(lengths)
+    max_length = torch.max(lengths)
+    max_length = torch.min(max_length, max_chunks * torch.ones_like(max_length))
+    # truncate input_ids and attention_mask to max_length
+    input_ids = [i[:max_length] for i in input_ids]
+    attention_mask = [i[:max_length] for i in attention_mask]
+    lengths = torch.min(lengths, max_chunks*torch.ones_like(lengths))
+    # pad the input_ids and attention_mask so that they have the same length [max_length, 512]
+    for i in range(len(input_ids)):
+        pad = torch.zeros((max_length - lengths[i],512), dtype=torch.long)
+        input_ids[i] = torch.cat((input_ids[i], pad), dim=0, )
+        attention_mask[i] = torch.cat((attention_mask[i], pad), dim=0)
+
+    return torch.stack(input_ids), torch.stack(attention_mask), labels, lengths
