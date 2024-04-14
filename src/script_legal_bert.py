@@ -51,7 +51,7 @@ lengths =[i.size(0) for i in input_ids]
 lengths_dev =[i.size(0) for i in input_ids_dev]
 
 lengths_test =[i.size(0) for i in input_ids_test]
-def collate_fn(data, max_chunks=3):
+def collate_fn_chunks(data, max_chunks=3):
     input_ids = [i[0] for i in data]
     attention_mask = [i[1] for i in data]
     labels = [i[2] for i in data]
@@ -94,19 +94,13 @@ test_dataset = ECHRDataset(input_ids_test, attention_mask_test, labels_test)
 print(len(dataset))
 # make a subset of the dataset
 
-collate_fn_10 = lambda x: collate_fn(x, 4)
 
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=3, shuffle=True, collate_fn=collate_fn_10)
-eval_dataloader = torch.utils.data.DataLoader(eval_dataset, batch_size=16, shuffle=True, collate_fn=collate_fn_10)
-x=next(iter(eval_dataloader))
-print(x[0].shape, x[1].shape, x[2].shape, x[3].shape)
-model_name = 'prajjwal1/bert-small'
-tokenizer = BertTokenizer.from_pretrained(model_name)
+
 class BertAttentionClassifier(nn.Module):
-    def __init__(self, num_chunks, max_length, bert_model_name='nlpaueb/legal-bert-base-uncased'):
+
+    def __init__(self, bert_model_name='nlpaueb/legal-bert-base-uncased'):
         super(BertAttentionClassifier, self).__init__()
-        self.num_chunks = num_chunks
-        self.max_length = max_length
+        
         
         # Load pre-trained BERT model and tokenizer
         self.bert = BertModel.from_pretrained(bert_model_name)
@@ -144,16 +138,24 @@ class BertAttentionClassifier(nn.Module):
         
         return logits
 
+n_chunks=4 # number of chunks to consider
+batch_size = 4 
 
+
+collate_fn = lambda x: collate_fn_chunks(x, n_chunks) # collate function with n. of chunks chosen
+dataloader = torch.utils.data.DataLoader(dataset, batch_size= batch_size, shuffle=True, collate_fn=collate_fn)
+eval_dataloader = torch.utils.data.DataLoader(eval_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 # train the model
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda', 2)
+print('starting training...')
 
-model = BertAttentionClassifier(num_chunks=3, max_length=10, bert_model_name='nlpaueb/legal-bert-base-uncased')
+model = BertAttentionClassifier( bert_model_name='nlpaueb/legal-bert-base-uncased')
 model.to(device)
 criterion = nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=3e-6)
-num_epochs=2
+num_epochs=4
+update_epochs=int(16 / batch_size ) # optimizer.step() every 16 examples
 best_loss = float('inf')
 
 for epoch in range(num_epochs):
@@ -163,31 +165,33 @@ for epoch in range(num_epochs):
     correct_samples = 0
     train_bar = tqdm(dataloader)
     for i, (input_ids_batch, attention_mask_batch, labels_batch, lengths_batch) in enumerate(train_bar):
-        optimizer.zero_grad()
         logits = model(input_ids_batch.to(device), attention_mask_batch.to(device))
         loss = criterion(logits, labels_batch.float().to(device))
         loss.backward()
-       
-        optimizer.step()
+        if ((i +1) % update_epochs ==0) or (i+1 ==len(dataloader)): 
+            optimizer.step()
+            optimizer.zero_grad()
         train_bar.set_description(f'Epoch {epoch}')
         total_loss += loss.item() *  len(labels_batch)
         total_samples += len(labels_batch)
-       
+    
 
         # compute the accuracy
         predictions = (logits > 0).long()
         correct_samples += (predictions == labels_batch.to(device)).sum().item()
         accuracy = correct_samples / total_samples
         average_loss = total_loss / total_samples
-        train_bar.set_postfix({'loss': f'{average_loss}',  'accuracy': f'{accuracy}'})
-
+        train_bar.set_postfix({'loss': f'{average_loss = :.3f}',  'accuracy': f'{accuracy = :.3f}'})
+    
     # evaluate the model
     model.eval()
     total_loss = 0
     total_samples = 0
     correct_samples = 0
     with torch.no_grad():
-        for input_ids, attention_mask, labels, lengths in eval_dataloader:
+        eval_bar = tqdm(eval_dataloader)
+
+        for input_ids, attention_mask, labels, lengths in eval_bar :
             # compute the model output
             logits = model(input_ids.to(device), attention_mask.to(device))
             # compute the loss
@@ -203,26 +207,7 @@ for epoch in range(num_epochs):
     # keep the best model
     if average_loss < best_loss:
         best_loss = average_loss
-        torch.save(model.state_dict(), 'best_model.pth')
+        torch.save(model.state_dict(), f'../hier-legal-bert/best_model_{n_chunks}.pth')
 
 
 
-# evaluate the model
-model.eval()
-total_loss = 0
-total_samples = 0
-correct_samples = 0
-with torch.no_grad():
-    for input_ids, attention_mask, labels, lengths in eval_dataloader:
-        # compute the model output
-        logits = model(input_ids.to('cuda'), attention_mask.to('cuda'))
-        # compute the loss
-        loss = criterion(logits, labels.float().to('cuda'))
-        total_loss += loss.item()
-        total_samples += len(labels)
-        # compute the accuracy
-        predictions = (logits > 0).long()
-        correct_samples += (predictions == labels.to('cuda')).sum().item()
-accuracy = correct_samples / total_samples
-average_loss = total_loss / len(eval_dataloader)
-print(f'Accuracy: {accuracy}, Average Loss: {average_loss}', f'corretti {correct_samples}')
