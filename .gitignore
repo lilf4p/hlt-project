@@ -35,3 +35,4 @@ legal_embeddings/.DS_Store
 /models
 /hier-legal-bert
 notebook/hierbert.pt
+src/hier-legal-bert_8.pth
