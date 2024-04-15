@@ -5,12 +5,18 @@ import torch.nn as nn
 from transformers import BertModel, BertTokenizer
 import pandas as pd
 from tqdm import tqdm
-import sklearn
+from sklearn.metrics import classification_report, confusion_matrix
 from bertclass import BertAttentionClassifier
 from utils import collate_fn_chunks
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+n_chunks = 8 # number of chunks to consider
+batch_size = 1
 
 device =torch.device('cuda', 2)
-path_test ='../ECHR_Dataset_Tokenized/legal-bert-base-uncased/df_test_tokenized.pkl'
+path_test ='ECHR_Dataset_Tokenized/legal-bert-base-uncased/df_test_tokenized.pkl'
 df_test = pd.read_pickle(path_test)
 documents_test = df_test[['input_ids', 'attention_mask', 'label']]
 input_ids = documents_test.input_ids.tolist()
@@ -37,28 +43,25 @@ class ECHRDataset(torch.utils.data.Dataset):
 
 test_dataset = ECHRDataset(input_ids, attention_mask, labels_test)
 
-n_chunks = 2 # number of chunks to consider
-batch_size = 16
-
-
 collate_fn = lambda x: collate_fn_chunks(x, n_chunks) # collate function with n. of chunks chosen
 dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 model = BertAttentionClassifier( bert_model_name='nlpaueb/legal-bert-base-uncased')
 # load weights
-path_weights = f'../hier-legal-bert/best_model_{n_chunks}.pth'
+path_weights = f'/storagenfs/l.stoppani/hlt-project/hlt-project/src/hier-legal-bert_{n_chunks}.pth'
 
-model.load_state_dict(torch.load(path_weights))
+# load a model that was saved previpously with accelerator, the model now has a 'module.' prefix in the state_dict keys
+checkpoint = torch.load(path_weights, map_location=device)
+# remove the 'module.' prefix from the state_dict keys
+checkpoint = {k.replace('module.', ''): v for k, v in checkpoint.items()}
+model.load_state_dict(checkpoint)
+
 model.to(device)
+
 model.eval()
 total_loss = 0
 total_samples = 0
 correct_samples = 0
-
-import torch
-import torch.nn as nn
-from tqdm import tqdm
-
 
 with torch.no_grad():
     bar = tqdm(dataloader)
@@ -67,16 +70,18 @@ with torch.no_grad():
     total_samples = 0
     correct_samples = 0
     total_pred = []
+    labels_to_predict = []
     
     for input_ids, attention_mask, labels, lengths in bar:
         # compute the model output
         logits = model(input_ids.to(device), attention_mask.to(device))
         # compute the loss
-        loss = criterion(logits, labels.float().to(device)) 
+        loss = criterion(logits, labels.float().to(device))            
         total_loss += loss.item()
         total_samples += len(labels)
         
         # compute the accuracy
+        labels_to_predict.append(labels)
         predictions = (logits > 0).long()
         total_pred.append(predictions)
         correct_samples += (predictions == labels.to(device)).sum().item()
@@ -85,3 +90,10 @@ with torch.no_grad():
     average_loss = total_loss / len(dataloader)
     
     print(f'Accuracy: {accuracy:.4f}, Average Loss: {average_loss:.4f}')
+    total_pred = torch.cat(total_pred).cpu()
+    labels_to_predict = torch.cat(labels_to_predict).cpu()
+    print(classification_report(labels_to_predict, total_pred))
+    # confusion matrix
+    cm = confusion_matrix(labels_to_predict, total_pred)
+    sns.heatmap(cm, annot=True, cmap='Blues', fmt='d')
+    plt.savefig(f'confusion_matrix_{n_chunks}.png')

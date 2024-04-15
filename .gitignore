@@ -34,3 +34,4 @@ legal_embeddings/.DS_Store
 /models
 /models
 /hier-legal-bert
+notebook/hierbert.pt
