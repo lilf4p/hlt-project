@@ -12,8 +12,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-n_chunks = 8 # number of chunks to consider
-batch_size = 1
+n_chunks = 4 # number of chunks to consider
+batch_size = 4
 
 device =torch.device('cuda', 2)
 path_test ='ECHR_Dataset_Tokenized/legal-bert-base-uncased/df_test_tokenized.pkl'
@@ -48,7 +48,7 @@ dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, sh
 
 model = BertAttentionClassifier( bert_model_name='nlpaueb/legal-bert-base-uncased')
 # load weights
-path_weights = f'/storagenfs/l.stoppani/hlt-project/hlt-project/src/hier-legal-bert_{n_chunks}.pth'
+path_weights = f'hier-legal-bert/best_model_{n_chunks}.pth'
 
 # load a model that was saved previpously with accelerator, the model now has a 'module.' prefix in the state_dict keys
 checkpoint = torch.load(path_weights, map_location=device)
@@ -93,6 +93,7 @@ with torch.no_grad():
     total_pred = torch.cat(total_pred).cpu()
     labels_to_predict = torch.cat(labels_to_predict).cpu()
     print(classification_report(labels_to_predict, total_pred))
+
     # confusion matrix
     cm = confusion_matrix(labels_to_predict, total_pred)
     sns.heatmap(cm, annot=True, cmap='Blues', fmt='d')
