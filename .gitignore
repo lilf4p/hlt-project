@@ -36,3 +36,4 @@ legal_embeddings/.DS_Store
 /hier-legal-bert
 notebook/hierbert.pt
 src/hier-legal-bert_8.pth
+/venv
