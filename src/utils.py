@@ -1,6 +1,6 @@
 from torch.utils.data import Dataset
 import torch.nn.functional as F
-from echrdataset import ECHRDataset
+from src.echrdataset import ECHRDataset
 import torch
 import numpy as np
 import pandas as pd
@@ -237,7 +237,7 @@ def reset_weights(m):
                 print(f'Reset trainable parameters of layer = {layer}')
                 layer.reset_parameters()
 
-def get_device():
+def get_device(id=0):
     """
     Get the device to run the model on.
     Returns:
@@ -245,7 +245,7 @@ def get_device():
     """
     if (torch.cuda.is_available()):
         print("Running on GPU")
-        device = torch.device('cuda', 1)
+        device = torch.device('cuda', id)
     elif (torch.backends.mps.is_available()):
         print("Running on MPS")
         device = torch.device('mps')
