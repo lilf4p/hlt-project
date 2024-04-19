@@ -11,50 +11,19 @@ from datasets import Dataset
 model_name ='google/bigbird-roberta-base'
 from transformers import AutoModelForSequenceClassification, BigBirdTokenizerFast
 tokenizer = BigBirdTokenizerFast.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
-
-tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-tokenizer.is_fast 
-tokenize =False
-if tokenize:
-    def encode_text(examples):
-        return tokenizer(examples['text'], padding="max_length", truncation=True)
-
-    df_train= pd.read_csv('../ECHR_Dataset/train.csv')
-    df_test= pd.read_csv('../ECHR_Dataset/test.csv')         
-    df_dev= pd.read_csv('../ECHR_Dataset/dev.csv')
-
-
-    df_train = df_train[['text','label']]
-    df_test = df_test[['text','label']]
-    df_dev = df_dev[['text','label']]
-
-    # convert to huggingface dataset    
-    from datasets import Dataset
-    train_dataset = Dataset.from_pandas(df_train)
-    dev_dataset = Dataset.from_pandas(df_dev)
-    test_dataset = Dataset.from_pandas(df_test)
-    print(train_dataset)
-    train_dataset_tokenized = train_dataset.map(encode_text, batched=True)
-    dev_dataset_tokenized = dev_dataset.map(encode_text, batched=True)
-    test_dataset_tokenized = test_dataset.map(encode_text, batched=True)
-    # save tokenized dataset
-    train_dataset_tokenized.save_to_disk(f'../ECHR_Dataset_Tokenized/{model_name}/train')
-    dev_dataset_tokenized.save_to_disk(f'../ECHR_Dataset_Tokenized/{model_name}/dev')
-    test_dataset_tokenized.save_to_disk(f'../ECHR_Dataset_Tokenized/{model_name}/test')
-
-else:
-    # load tokenized dataset
-    train_dataset_tokenized = Dataset.load_from_disk(f'../ECHR_Dataset_Tokenized/{model_name}/train')
-    dev_dataset_tokenized = Dataset.load_from_disk(f'../ECHR_Dataset_Tokenized/{model_name}/dev')
-    test_dataset_tokenized = Dataset.load_from_disk(f'../ECHR_Dataset_Tokenized/{model_name}/test')
+model = AutoModelForSequenceClassification.from_pretrained('models/google/bigbird-roberta-base', num_labels=2)
+model
+# load tokenized dataset
+train_dataset_tokenized = Dataset.load_from_disk(f'../ECHR_Dataset_Tokenized/{model_name}/train')
+dev_dataset_tokenized = Dataset.load_from_disk(f'../ECHR_Dataset_Tokenized/{model_name}/dev')
+test_dataset_tokenized = Dataset.load_from_disk(f'../ECHR_Dataset_Tokenized/{model_name}/test')
 
 # trainer
 # CUDA_VISIBLE_DEVICES = 0,2,3
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,3"
-print(os.environ["CUDA_VISIBLE_DEVICES"])
 
+# load model
 path ='models/'+ model_name
 
 def compute_metrics(pred):
@@ -104,7 +73,4 @@ trainer = Trainer(
     tokenizer=tokenizer
 )
 
-trainer.train()
-pred = trainer.predict(test_dataset_tokenized)
-
-trainer.save_model()
+trainer.evaluate(test_dataset_tokenized)
