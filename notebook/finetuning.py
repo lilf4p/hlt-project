@@ -1,4 +1,8 @@
-# imports
+# CUDA_VISIBLE_DEVICES = 0,2,3
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,3"
+print(os.environ["CUDA_VISIBLE_DEVICES"])
+
 import numpy as np
 import transformers
 import torch
@@ -22,11 +26,6 @@ dev_dataset_tokenized = Dataset.load_from_disk(f'ECHR_Dataset_Tokenized/allenai/
 test_dataset_tokenized = Dataset.load_from_disk(f'ECHR_Dataset_Tokenized/allenai/longformer-base-4096/test')
 
 # trainer
-# CUDA_VISIBLE_DEVICES = 0,2,3
-#import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,3"
-#print(os.environ["CUDA_VISIBLE_DEVICES"])
-#os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 path ='models/'+ model_name
 
