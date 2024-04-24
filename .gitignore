@@ -32,8 +32,8 @@ legal_embeddings/legal-bert-base-uncased/emb_tr.pkl
 legal_embeddings/.DS_Store
 /embeddings_datasets
 /models
-/models
 /hier-legal-bert
 notebook/hierbert.pt
 src/hier-legal-bert_8.pth
 /venv
+notebook/models
