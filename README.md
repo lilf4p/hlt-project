@@ -48,10 +48,10 @@ To run the code and reproduce the experiments conducted in the project, follow t
    git clone https://github.com/lilf4p/hlt-project.git
    ```
 
-2. Navigate to the `code/` directory:
+2. Navigate to the `src/` directory:
 
    ```bash
-   cd hlt-project/code
+   cd hlt-project/src
    ```
 
 3. Run the Python scripts corresponding to the models and experiments of interest.
