@@ -1,4 +1,5 @@
-# plot a scatter plot of a list of data 
+# %% Cell 1
+# plot a scatter plot of a list of data
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -9,9 +10,10 @@ sns.set_theme()
 X = [1,2,4,8]
 Y = [86,85,78,85]
 
+# %% Cell 2
 plt.plot(X,Y, marker='o')
 
-# plot all y values from 0 
+# plot all y values from 0
 plt.yticks(np.arange(0, 100, 5))
 
 # set y axis to log scale
@@ -25,4 +27,5 @@ plt.yticks(fontweight='bold')
 plt.xlabel('Number of Chunks', fontweight='bold', fontsize=12)
 plt.ylabel('F1 (%)', fontweight='bold', fontsize=12)
 
+# %% Cell 3
 plt.show()
